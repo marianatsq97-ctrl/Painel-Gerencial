@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portal Gerencial | Entrar</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body data-page="login">
+    <main class="login-screen">
+      <section class="login-panel">
+        <img class="login-logo" src="logo-areia-ana.svg" alt="Logo Areia Ana" />
+        <form id="loginForm" class="login-form" novalidate>
+          <label class="login-field">
+            <span>Usuário</span>
+            <input id="username" name="username" type="text" autocomplete="username" placeholder="Digite seu usuário" required />
+          </label>
+
+          <label class="login-field">
+            <span>Senha</span>
+            <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Digite sua senha" required />
+          </label>
+
+          <button class="login-submit" type="submit">Acessar</button>
+          <p id="loginMessage" class="login-message" role="alert" aria-live="polite"></p>
+        </form>
+      </section>
+    </main>
+
+    <script src="utils.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

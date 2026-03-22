@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Portal Gerencial</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body data-page="portal">
+    <main class="portal-shell">
+      <section class="portal-card">
+        <img class="portal-logo" src="logo-areia-ana.svg" alt="Logo Areia Ana" />
+        <span class="portal-eyebrow">PORTAL DE ACESSOS</span>
+        <h1>Portal Gerencial</h1>
+        <p class="portal-description">
+          Acesso centralizado ao ambiente executivo com projeções e faturamento, contas a receber e inadimplentes.
+        </p>
+
+        <nav class="portal-pills" aria-label="Painéis disponíveis">
+          <span class="portal-pill is-active">Projeções e faturamento</span>
+          <span class="portal-pill">A receber</span>
+          <span class="portal-pill">Inadimplentes</span>
+        </nav>
+
+        <section class="portal-grid">
+          <a class="portal-option" href="dashboard.html?panel=faturamento">
+            <span class="portal-option-tag">Resumo</span>
+            <h2>Projeções e Faturamento</h2>
+            <p>Visão consolidada de realizado, projetado, volumes e faturamento por unidade.</p>
+          </a>
+
+          <a class="portal-option" href="dashboard.html?panel=receber">
+            <span class="portal-option-tag">Operacional</span>
+            <h2>A Receber</h2>
+            <p>Acompanhamento por cliente, portador, vencimento e títulos em carteira.</p>
+          </a>
+
+          <a class="portal-option" href="dashboard.html?panel=inadimplentes">
+            <span class="portal-option-tag">Cobrança</span>
+            <h2>Inadimplentes</h2>
+            <p>Monitoramento de clientes vencidos, faixas de atraso e detalhamento executivo.</p>
+          </a>
+        </section>
+
+        <div class="portal-footer-actions">
+          <div class="portal-profile" id="portalProfileLabel">Perfil</div>
+          <a class="portal-admin-link is-hidden" id="portalAdminLink" href="admin.html">Atualizar bases</a>
+          <button class="portal-logout" id="logoutButton" type="button">Sair</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="utils.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Painel Gerencial</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body data-page="dashboard">
+    <main class="dashboard-page-shell">
+      <header class="dashboard-header-bar">
+        <div>
+          <span class="dashboard-kicker">Portal Gerencial</span>
+          <h1 id="dashboardTitle">Painel</h1>
+          <p id="dashboardSubtitle">Selecione filtros para analisar os indicadores.</p>
+        </div>
+        <div class="dashboard-header-actions">
+          <a class="dashboard-header-btn" href="portal.html">Voltar ao portal</a>
+          <a class="dashboard-header-btn is-hidden" id="dashboardAdminLink" href="admin.html">Atualizar bases</a>
+          <button class="dashboard-header-btn is-ghost" id="logoutButton" type="button">Sair</button>
+        </div>
+      </header>
+
+      <div id="dashboardEmptyState" class="dashboard-empty is-hidden">
+        Nenhum dado financeiro foi processado ainda. Vá ao painel administrativo, envie as bases e rode a consolidação.
+      </div>
+
+      <nav class="dashboard-panel-switch" aria-label="Trocar aba do painel">
+        <button class="dashboard-switch-link" data-panel-button="faturamento" type="button">Projeções e faturamento</button>
+        <button class="dashboard-switch-link" data-panel-button="receber" type="button">A receber</button>
+        <button class="dashboard-switch-link" data-panel-button="inadimplentes" type="button">Inadimplentes</button>
+      </nav>
+
+      <section class="dashboard-container">
+        <div class="topbar">
+          <div class="filter-box">
+            <label id="filterPrimaryLabel" for="filterPrimary">Filtro principal</label>
+            <select id="filterPrimary"></select>
+          </div>
+
+          <div class="filter-box">
+            <label id="filterSecondaryLabel" for="filterSecondary">Filtro secundário</label>
+            <select id="filterSecondary"></select>
+          </div>
+
+          <div class="filter-box">
+            <label id="filterTertiaryLabel" for="filterTertiary">Visualização</label>
+            <select id="filterTertiary"></select>
+          </div>
+
+          <button class="btn-clear" id="btnLimpar" type="button">Limpar filtros</button>
+        </div>
+
+        <div class="mini-cards">
+          <div class="small-card highlight-orange">
+            <div class="small-title">Arquivos</div>
+            <div class="small-value" id="miniArquivos">0</div>
+          </div>
+          <div class="small-card">
+            <div class="small-title" id="miniLabel1">Base 1</div>
+            <div class="small-value" id="miniValue1">0</div>
+          </div>
+          <div class="small-card">
+            <div class="small-title" id="miniLabel2">Base 2</div>
+            <div class="small-value" id="miniValue2">0</div>
+          </div>
+          <div class="small-card">
+            <div class="small-title" id="miniLabel3">Base 3</div>
+            <div class="small-value" id="miniValue3">0</div>
+          </div>
+          <div class="small-card">
+            <div class="small-title" id="miniLabel4">Base 4</div>
+            <div class="small-value" id="miniValue4">0</div>
+          </div>
+        </div>
+
+        <div class="stats-row" id="bigCardsRow"></div>
+
+        <div class="charts-row">
+          <div class="chart-card" id="boxChartPrimary">
+            <h2 class="chart-title" id="chartPrimaryTitle">Gráfico principal</h2>
+            <div class="chart-wrap">
+              <canvas id="chartPrimary"></canvas>
+            </div>
+            <div class="legend-footer" id="chartPrimarySummary"></div>
+          </div>
+
+          <div class="chart-card" id="boxChartSecondary">
+            <h2 class="chart-title" id="chartSecondaryTitle">Gráfico secundário</h2>
+            <div class="chart-wrap">
+              <canvas id="chartSecondary"></canvas>
+            </div>
+            <div class="legend-footer" id="chartSecondarySummary"></div>
+          </div>
+        </div>
+
+        <div class="tables-row">
+          <div class="table-card" id="tableCardPrimary">
+            <div class="table-header orange" id="tablePrimaryTitle">Tabela 1</div>
+            <table>
+              <thead id="theadPrimary"></thead>
+              <tbody id="tbodyPrimary"></tbody>
+            </table>
+          </div>
+
+          <div class="table-card" id="tableCardSecondary">
+            <div class="table-header blue" id="tableSecondaryTitle">Tabela 2</div>
+            <table>
+              <thead id="theadSecondary"></thead>
+              <tbody id="tbodySecondary"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="footer-note" id="footerNote">Clique em uma barra ou ponto do gráfico para filtrar por unidade.</div>
+      </section>
+    </main>
+
+    <script src="utils.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
