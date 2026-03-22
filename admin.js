@@ -1,569 +1,915 @@
 (function () {
   const {
-    REQUIRED_SHEET,
-    VALID_EXTENSIONS,
-    saveFinanceData,
+    getSession,
+    saveSession,
+    clearSession,
     getFinanceData,
     clearFinanceData,
+    formatCurrency,
     formatDateBR,
     formatDateTimeBR,
-    escapeHtml,
-    normalizeText,
-    parseBrazilianNumber,
-    parseDate
+    escapeHtml
   } = window.FinanceiroUtils;
 
-  const PROJECOES_COLUMNS = {
-    periodo: ['periodo', 'período', 'mes', 'mês', 'competencia', 'competência'],
-    unidade: ['unidade', 'filial', 'regional', 'empresa'],
-    unidade_medida: ['unidade medida', 'unidade de medida', 'medida', 'u.m.', 'um'],
-    volume_realizado: ['volume realizado', 'vol realizado', 'realizado volume'],
-    volume_medio: ['volume medio', 'volume médio', 'vol medio', 'vol médio'],
-    volume_projetado: ['volume projetado', 'vol projetado', 'projetado volume'],
-    faturamento_realizado: ['faturamento realizado', 'fat realizado', 'realizado faturamento'],
-    faturamento_medio: ['faturamento medio', 'faturamento médio', 'fat medio', 'fat médio'],
-    faturamento_projetado: ['faturamento projetado', 'fat projetado', 'projetado faturamento']
+  const CREDENTIALS = {
+    admin: { password: 'admin123', role: 'admin' },
+    usuario: { password: '123', role: 'usuario' }
   };
 
-  const RECEBER_COLUMNS = {
-    cliente: ['cliente', 'sacado', 'razao social', 'razão social', 'nome cliente'],
-    documento: ['documento', 'titulo', 'título', 'nota', 'nf', 'numero', 'número'],
-    emissao: ['data', 'emissao', 'emissão', 'data emissao', 'data emissão'],
-    vencimento: ['vencimento', 'dt vencimento', 'data vencimento', 'vcto', 'vence'],
-    valor: ['valor', 'valor total', 'valor original', 'vlr', 'receber', 'total'],
-    valor_pago: ['valor pago', 'recebido', 'pago', 'valor recebido'],
-    saldo: ['saldo', 'valor em aberto', 'saldo atual'],
-    unidade: ['unidade', 'filial', 'regional', 'empresa'],
-    portador: ['portador', 'carteira', 'banco', 'cobrador']
+  const PANEL_META = {
+    faturamento: {
+      title: 'Painel de Projeções e Faturamento',
+      subtitle: 'Volume realizado, metas e faturamento por unidade de negócio.',
+      note: 'Clique em uma barra ou ponto do gráfico para filtrar por unidade.'
+    },
+    receber: {
+      title: 'Painel de Contas a Receber',
+      subtitle: 'Carteira futura por cliente e portador com visão gerencial.',
+      note: 'Clique em uma barra do gráfico para filtrar por cliente ou portador.'
+    },
+    inadimplentes: {
+      title: 'Painel de Inadimplentes',
+      subtitle: 'Valores vencidos por cliente e por faixa de atraso.',
+      note: 'Clique em uma barra do gráfico para filtrar por cliente ou faixa.'
+    }
   };
 
-  let selectedFiles = [];
+  const state = {
+    payload: null,
+    panel: 'faturamento',
+    clickedPrimary: null,
+    filters: {
+      calendar: '',
+      primary: 'todos',
+      secondary: 'todos',
+      tertiary: 'todos'
+    },
+    charts: {
+      primary: null,
+      secondary: null
+    }
+  };
 
   document.addEventListener('DOMContentLoaded', () => {
-    if (document.body.dataset.page !== 'admin') return;
+    const page = document.body.dataset.page;
 
-    const input = document.getElementById('fileInput');
-    const processButton = document.getElementById('processButton');
-    const clearButton = document.getElementById('clearReportsButton');
+    if (page === 'login') initLogin();
+    if (page === 'portal') initPortal();
+    if (page === 'admin') ensureAuthorized('admin');
+    if (page === 'dashboard') initDashboard();
 
-    input?.setAttribute('accept', [...VALID_EXTENSIONS, '.eb', '.txt'].join(','));
-    input?.addEventListener('change', handleFileSelection);
-    processButton?.addEventListener('click', processSelectedFiles);
-    clearButton?.addEventListener('click', clearReports);
-
-    const existingData = getFinanceData();
-    if (existingData?.tables) {
-      renderPayload(existingData);
-    }
+    setupLogout();
   });
 
-  function handleFileSelection(event) {
-    selectedFiles = Array.from(event.currentTarget?.files || []);
-    setText('selectedFileLabel', selectedFiles.length ? selectedFiles.map((file) => file.name).join(' • ') : 'Nenhum arquivo selecionado');
-    setMessage(selectedFiles.length ? 'Arquivos prontos para processamento.' : 'Selecione os arquivos das bases.', 'idle');
-  }
-
-  function clearReports() {
-    clearFinanceData();
-    selectedFiles = [];
-
-    const input = document.getElementById('fileInput');
-    if (input) input.value = '';
-
-    setText('selectedFileLabel', 'Nenhum arquivo selecionado');
-    setText('fileNameValue', '0');
-    setText('projecoesValue', '0');
-    setText('receberValue', '0');
-    setText('inadimplentesValue', '0');
-    setText('updatedAtValue', 'Sem atualização');
-    setText('previewTitle', 'Amostra da última tabela gerada');
-
-    const metadataList = document.getElementById('metadataList');
-    if (metadataList) {
-      metadataList.innerHTML = `
-        <div><dt>Status</dt><dd>Relatórios limpos para novo envio.</dd></div>
-        <div><dt>Arquivos</dt><dd>-</dd></div>
-        <div><dt>Última ação</dt><dd>-</dd></div>
-      `;
-    }
-
-    const fileListPreview = document.getElementById('fileListPreview');
-    if (fileListPreview) fileListPreview.innerHTML = '';
-
-    const previewTableHead = document.getElementById('previewTableHead');
-    const previewTableBody = document.getElementById('previewTableBody');
-    if (previewTableHead) previewTableHead.innerHTML = '<tr><th>Sem dados</th></tr>';
-    if (previewTableBody) {
-      previewTableBody.innerHTML = '<tr><td colspan="6" class="empty-state-cell">A prévia será exibida após o processamento.</td></tr>';
-    }
-
-    setMessage('Relatórios removidos. Agora você pode enviar novas bases.', 'success');
-  }
-
-  async function processSelectedFiles() {
-    if (!selectedFiles.length) {
-      setMessage('Selecione ao menos um arquivo para processar.', 'error');
+  function initLogin() {
+    const session = getSession();
+    if (session) {
+      window.location.replace('portal.html');
       return;
     }
 
-    setMessage('Lendo planilhas e consolidando bases...', 'loading');
+    const form = document.getElementById('loginForm');
+    const message = document.getElementById('loginMessage');
 
-    try {
-      const tables = {
-        tb_projecoes: [],
-        tb_a_receber: [],
-        tb_inadimplentes: []
-      };
-      const processedFiles = [];
+    form?.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const username = String(document.getElementById('username')?.value || '').trim().toLowerCase();
+      const password = String(document.getElementById('password')?.value || '');
+      const credential = CREDENTIALS[username];
 
-      for (const file of selectedFiles) {
-        const source = await readSource(file);
-        const datasetType = detectDataset(file, source);
-        processedFiles.push({ name: file.name, datasetType });
-
-        if (datasetType === 'projecoes') {
-          tables.tb_projecoes.push(...parseProjecoes(source, file));
-        } else if (datasetType === 'receber') {
-          tables.tb_a_receber.push(...parseReceber(source, file));
-        } else if (datasetType === 'inadimplentes') {
-          tables.tb_inadimplentes.push(...parseInadimplentes(source, file));
-        }
-      }
-
-      tables.tb_projecoes = dedupeBy(tables.tb_projecoes, (row) => `${row.periodo}|${row.unidade}`);
-      tables.tb_a_receber = dedupeBy(tables.tb_a_receber, (row) => `${row.cliente}|${row.documento}|${row.vencimento}|${row.saldo}`)
-        .filter((row) => row.saldo > 0 && row.dias_para_vencer >= 0)
-        .sort((a, b) => a.dias_para_vencer - b.dias_para_vencer);
-      tables.tb_inadimplentes = dedupeBy(tables.tb_inadimplentes, (row) => `${row.cliente}|${row.documento}|${row.vencimento}|${row.saldo}`)
-        .filter((row) => row.saldo > 0 && row.dias_em_atraso > 0)
-        .sort((a, b) => b.dias_em_atraso - a.dias_em_atraso);
-
-      const payload = {
-        updatedAt: new Date().toISOString(),
-        processedFiles,
-        tables
-      };
-
-      saveTables(payload);
-      renderPayload(payload);
-      setMessage('Bases consolidadas com sucesso. Redirecionando para o dashboard...', 'success');
-      setTimeout(() => {
-        window.location.href = 'dashboard.html';
-      }, 900);
-    } catch (error) {
-      console.error(error);
-      setMessage(error.message || 'Falha ao processar as bases enviadas.', 'error');
-    }
-  }
-
-  async function readSource(file) {
-    const extension = getExtension(file.name);
-    const isExcel = ['.xlsx', '.xls', '.xlsm', '.xlsb'].includes(extension);
-    if (isExcel) {
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
-      return { kind: 'excel', workbook, fileName: file.name };
-    }
-
-    const text = await file.text();
-    return { kind: 'text', text, fileName: file.name };
-  }
-
-  function getExtension(fileName) {
-    const lastDot = String(fileName || '').lastIndexOf('.');
-    return lastDot >= 0 ? String(fileName).slice(lastDot).toLowerCase() : '';
-  }
-
-  function detectDataset(file, source) {
-    const normalizedName = normalizeText(file.name);
-    if (normalizedName.includes('receber')) return 'receber';
-    if (normalizedName.includes('vencid') || normalizedName.includes('inadimpl')) return 'inadimplentes';
-    if (normalizedName.includes('projec') || normalizedName.includes('fatur')) return 'projecoes';
-    if (source.kind === 'excel' && findProjectionSheetName(source.workbook)) return 'projecoes';
-    return 'receber';
-  }
-
-  function parseProjecoes(source) {
-    if (source.kind !== 'excel') {
-      throw new Error('A base de projeções precisa ser enviada em formato Excel.');
-    }
-
-    const sheetName = findProjectionSheetName(source.workbook);
-    if (!sheetName) {
-      throw new Error("A aba 'Cálculos de Projeção' não foi encontrada");
-    }
-
-    const rows = sheetToRows(source.workbook.Sheets[sheetName]);
-    const tableStartIndex = findRowIndex(rows, 'volumes e faturamento');
-    const scopedRows = tableStartIndex >= 0 ? rows.slice(tableStartIndex + 1) : rows;
-    const headerIndex = detectHeaderRow(scopedRows, PROJECOES_COLUMNS, 12);
-    const headers = scopedRows[headerIndex] || [];
-    const map = mapColumns(headers, PROJECOES_COLUMNS);
-
-    return scopedRows
-      .slice(headerIndex + 1)
-      .map((row) => ({
-        periodo: String(valueAt(row, map.periodo) || '').trim(),
-        unidade: String(valueAt(row, map.unidade) || '').trim(),
-        unidade_medida: String(valueAt(row, map.unidade_medida) || '').trim(),
-        volume_realizado: parseBrazilianNumber(valueAt(row, map.volume_realizado)),
-        volume_medio: parseBrazilianNumber(valueAt(row, map.volume_medio)),
-        volume_projetado: parseBrazilianNumber(valueAt(row, map.volume_projetado)),
-        faturamento_realizado: parseBrazilianNumber(valueAt(row, map.faturamento_realizado)),
-        faturamento_medio: parseBrazilianNumber(valueAt(row, map.faturamento_medio)),
-        faturamento_projetado: parseBrazilianNumber(valueAt(row, map.faturamento_projetado))
-      }))
-      .filter((row) => row.periodo || row.unidade || hasNumericValues(row));
-  }
-
-  function parseReceber(source, file) {
-    const rows = getRowsFromSource(source);
-    const headerIndex = detectHeaderRow(rows, RECEBER_COLUMNS, 15);
-    const headers = rows[headerIndex] || [];
-    const map = mapColumns(headers, RECEBER_COLUMNS);
-    const today = startOfDay(new Date());
-    const origin = normalizeText(file.name).includes('topcon') ? 'TOPCON' : 'TOPGERENTE';
-
-    return rows
-      .slice(headerIndex + 1)
-      .map((row) => normalizeFinancialRow(row, map, origin))
-      .filter(Boolean)
-      .map((row) => {
-        const dias = calculateDays(row.vencimento, today);
-        return {
-          ...row,
-          dias_para_vencer: dias,
-          classificacao_vencimento: classifyUpcoming(dias)
-        };
-      })
-      .filter((row) => row.dias_para_vencer >= 0);
-  }
-
-  function parseInadimplentes(source, file) {
-    const rows = getRowsFromSource(source);
-    const normalizedName = normalizeText(file.name);
-    const today = startOfDay(new Date());
-
-    const records = normalizedName.includes('topcon')
-      ? parseTopconBlocks(rows)
-      : parseStructuredInadimplentes(rows, normalizedName.includes('topgerente') ? 'TOPGERENTE' : 'TOPCON');
-
-    return records
-      .map((row) => {
-        const dias = Math.max(calculateDays(today, row.vencimento), 0);
-        return {
-          ...row,
-          dias_em_atraso: dias,
-          faixa_atraso: classifyDelay(dias)
-        };
-      })
-      .filter((row) => row.dias_em_atraso > 0);
-  }
-
-  function parseStructuredInadimplentes(rows, origin) {
-    const headerIndex = detectHeaderRow(rows, RECEBER_COLUMNS, 15);
-    const map = mapColumns(rows[headerIndex] || [], RECEBER_COLUMNS);
-    return rows
-      .slice(headerIndex + 1)
-      .map((row) => normalizeFinancialRow(row, map, origin))
-      .filter(Boolean)
-      .filter((row) => row.saldo > 0 && row.vencimento);
-  }
-
-  function parseTopconBlocks(rows) {
-    const records = [];
-    let currentClient = '';
-
-    rows.forEach((row) => {
-      const values = row.map((cell) => String(cell || '').trim()).filter(Boolean);
-      if (!values.length || isSeparatorRow(values)) return;
-
-      if (isLikelyClientHeader(values)) {
-        currentClient = values.join(' ').trim();
+      if (!credential || credential.password !== password) {
+        if (message) message.textContent = 'Usuário ou senha inválidos.';
         return;
       }
 
-      const record = normalizeLooseRow(values, currentClient, 'TOPCON');
-      if (record) records.push(record);
-    });
-
-    return records;
-  }
-
-  function normalizeFinancialRow(row, map, origin) {
-    const cliente = String(valueAt(row, map.cliente) || '').trim();
-    const documento = String(valueAt(row, map.documento) || '').trim();
-    const emissao = parseDate(valueAt(row, map.emissao));
-    const vencimento = parseDate(valueAt(row, map.vencimento));
-    const valor = Math.abs(parseBrazilianNumber(valueAt(row, map.valor)));
-    const valorPago = Math.abs(parseBrazilianNumber(valueAt(row, map.valor_pago)));
-    const saldoInformado = Math.abs(parseBrazilianNumber(valueAt(row, map.saldo)));
-    const saldo = map.saldo !== undefined ? saldoInformado : Math.max(valor - valorPago, 0);
-    const unidade = String(valueAt(row, map.unidade) || origin).trim() || origin;
-    const portador = String(valueAt(row, map.portador) || unidade || origin).trim() || origin;
-
-    if (!cliente && !documento && !vencimento && !valor && !saldo) {
-      return null;
-    }
-
-    return {
-      cliente: cliente || 'Sem cliente',
-      documento: documento || '-',
-      emissao: emissao ? emissao.toISOString() : '',
-      vencimento: vencimento ? vencimento.toISOString() : '',
-      valor,
-      valor_pago: valorPago,
-      saldo,
-      origem: origin,
-      unidade,
-      portador
-    };
-  }
-
-  function normalizeLooseRow(values, currentClient, origin) {
-    if (!currentClient) return null;
-    const dates = values.map(parseDate).filter(Boolean);
-    const numerics = values.map(parseBrazilianNumber).filter((value) => value > 0);
-    if (!dates.length || !numerics.length) return null;
-
-    const dueDate = dates[dates.length - 1];
-    const amount = Math.max(...numerics.map(Math.abs));
-    const document = values.find((value) => /\d/.test(value) && !parseDate(value)) || '-';
-
-    return {
-      cliente: currentClient,
-      documento: String(document).trim() || '-',
-      emissao: '',
-      vencimento: dueDate.toISOString(),
-      valor: amount,
-      valor_pago: 0,
-      saldo: amount,
-      origem: origin,
-      unidade: origin,
-      portador: origin
-    };
-  }
-
-  function getRowsFromSource(source) {
-    if (source.kind === 'excel') {
-      const sheetName = source.workbook.SheetNames[0];
-      return sheetToRows(source.workbook.Sheets[sheetName]);
-    }
-    return textToRows(source.text);
-  }
-
-  function findProjectionSheetName(workbook) {
-    const exact = workbook.SheetNames.find((name) => normalizeText(name) === normalizeText(REQUIRED_SHEET));
-    if (exact) return exact;
-
-    return workbook.SheetNames.find((name) => {
-      const rows = sheetToRows(workbook.Sheets[name]).slice(0, 20);
-      return rows.some((row) => row.some((cell) => normalizeText(cell).includes('volumes e faturamento')));
+      saveSession({ username, role: credential.role, loginAt: new Date().toISOString() });
+      window.location.href = 'portal.html';
     });
   }
 
-  function sheetToRows(sheet) {
-    return XLSX.utils.sheet_to_json(sheet, {
-      header: 1,
-      raw: false,
-      defval: '',
-      blankrows: false
-    });
-  }
+  function initPortal() {
+    const session = ensureAuthorized();
+    if (!session) return;
 
-  function textToRows(text) {
-    const lines = String(text || '').split(/\r?\n/).filter((line) => line.trim());
-    if (!lines.length) return [];
-    const delimiter = detectDelimiter(lines[0]);
-    return lines.map((line) => splitQuotedLine(line, delimiter));
-  }
+    const profile = document.getElementById('portalProfileLabel');
+    const adminLink = document.getElementById('portalAdminLink');
 
-  function detectDelimiter(line) {
-    const candidates = [';', '\t', ',', '|'];
-    return candidates
-      .map((delimiter) => ({ delimiter, score: line.split(delimiter).length }))
-      .sort((a, b) => b.score - a.score)[0].delimiter;
-  }
-
-  function splitQuotedLine(line, delimiter) {
-    const cells = [];
-    let current = '';
-    let insideQuotes = false;
-    for (let index = 0; index < line.length; index += 1) {
-      const char = line[index];
-      if (char === '"') {
-        insideQuotes = !insideQuotes;
-        continue;
-      }
-      if (char === delimiter && !insideQuotes) {
-        cells.push(current.trim());
-        current = '';
-        continue;
-      }
-      current += char;
-    }
-    cells.push(current.trim());
-    return cells;
-  }
-
-  function detectHeaderRow(rows, aliases, maxScan) {
-    const limit = Math.min(rows.length, maxScan || 10);
-    let bestIndex = 0;
-    let bestScore = -1;
-    for (let index = 0; index < limit; index += 1) {
-      const row = rows[index] || [];
-      const score = row.reduce((total, cell) => {
-        const normalizedCell = normalizeText(cell);
-        if (!normalizedCell) return total;
-        const matched = Object.values(aliases).some((items) => items.some((item) => normalizedCell.includes(normalizeText(item))));
-        return total + (matched ? 1 : 0);
-      }, 0);
-      if (score > bestScore) {
-        bestScore = score;
-        bestIndex = index;
-      }
-    }
-    return bestIndex;
-  }
-
-  function mapColumns(headers, aliases) {
-    const map = {};
-    headers.forEach((header, index) => {
-      const normalizedHeader = normalizeText(header);
-      Object.entries(aliases).forEach(([key, items]) => {
-        if (map[key] !== undefined) return;
-        if (items.some((item) => normalizedHeader.includes(normalizeText(item)))) {
-          map[key] = index;
-        }
-      });
-    });
-    return map;
-  }
-
-  function renderPayload(payload) {
-    const { tb_projecoes, tb_a_receber, tb_inadimplentes } = payload.tables;
-    setText('fileNameValue', String(payload.processedFiles.length));
-    setText('projecoesValue', String(tb_projecoes.length));
-    setText('receberValue', String(tb_a_receber.length));
-    setText('inadimplentesValue', String(tb_inadimplentes.length));
-    setText('updatedAtValue', `Atualizado em ${formatDateTimeBR(payload.updatedAt)}`);
-    setText('previewTitle', 'Amostra da tabela consolidada mais relevante');
-
-    const fileListPreview = document.getElementById('fileListPreview');
-    if (fileListPreview) {
-      fileListPreview.innerHTML = payload.processedFiles
-        .map((file) => `<span class="chip">${escapeHtml(file.name)} → ${escapeHtml(file.datasetType)}</span>`)
-        .join('');
+    if (profile) {
+      profile.textContent = session.role === 'admin' ? 'Perfil: Administrador' : 'Perfil: Usuário';
     }
 
-    const metadataList = document.getElementById('metadataList');
-    if (metadataList) {
-      metadataList.innerHTML = `
-        <div><dt>Status</dt><dd>Consolidação concluída</dd></div>
-        <div><dt>Arquivos</dt><dd>${payload.processedFiles.length}</dd></div>
-        <div><dt>tb_projecoes</dt><dd>${tb_projecoes.length} registros</dd></div>
-        <div><dt>tb_a_receber</dt><dd>${tb_a_receber.length} registros</dd></div>
-        <div><dt>tb_inadimplentes</dt><dd>${tb_inadimplentes.length} registros</dd></div>
-      `;
+    if (adminLink && session.role === 'admin') {
+      adminLink.classList.remove('is-hidden');
+    }
+  }
+
+  function initDashboard() {
+    const session = ensureAuthorized();
+    if (!session) return;
+
+    state.payload = getFinanceData();
+    state.panel = getRequestedPanel();
+    highlightPanelLinks(state.panel);
+
+    const adminLink = document.getElementById('dashboardAdminLink');
+    const clearReportsButton = document.getElementById('clearDashboardReportsButton');
+    if (session.role === 'admin') {
+      adminLink?.classList.remove('is-hidden');
+      clearReportsButton?.classList.remove('is-hidden');
     }
 
-    const previewHeaders = document.getElementById('previewTableHead');
-    const previewBody = document.getElementById('previewTableBody');
-    const previewDataset = tb_inadimplentes.length
-      ? { title: 'tb_inadimplentes', rows: tb_inadimplentes }
-      : tb_a_receber.length
-        ? { title: 'tb_a_receber', rows: tb_a_receber }
-        : { title: 'tb_projecoes', rows: tb_projecoes };
-    const previewRows = previewDataset.rows.slice(0, 6);
-
-    if (!previewRows.length) {
-      previewHeaders.innerHTML = '<tr><th>Sem dados</th></tr>';
-      previewBody.innerHTML = '<tr><td class="empty-state-cell">Nenhum dado consolidado.</td></tr>';
+    const emptyState = document.getElementById('dashboardEmptyState');
+    if (!state.payload?.tables) {
+      emptyState?.classList.remove('is-hidden');
       return;
     }
 
-    const columns = Object.keys(previewRows[0]);
-    previewHeaders.innerHTML = `<tr>${columns.map((column) => `<th>${escapeHtml(column)}</th>`).join('')}</tr>`;
-    previewBody.innerHTML = previewRows
-      .map((row) => `<tr>${columns.map((column) => `<td>${escapeHtml(formatValue(row[column]))}</td>`).join('')}</tr>`)
-      .join('');
+    emptyState?.classList.add('is-hidden');
+    bindDashboardEvents();
+    updateDashboard();
   }
 
-  function saveTables(payload) {
-    saveFinanceData(payload);
+  function bindDashboardEvents() {
+    document.querySelectorAll('[data-panel-button]').forEach((button) => {
+      button.addEventListener('click', () => {
+        switchPanel(button.dataset.panelButton);
+      });
+    });
+
+    document.getElementById('filterCalendar')?.addEventListener('change', (event) => {
+      state.filters.calendar = event.target.value;
+      state.clickedPrimary = null;
+      updateDashboard();
+    });
+
+    document.getElementById('filterPrimary')?.addEventListener('change', (event) => {
+      state.filters.primary = event.target.value;
+      state.clickedPrimary = null;
+      updateDashboard();
+    });
+
+    document.getElementById('filterSecondary')?.addEventListener('change', (event) => {
+      state.filters.secondary = event.target.value;
+      state.clickedPrimary = null;
+      updateDashboard();
+    });
+
+    document.getElementById('filterTertiary')?.addEventListener('change', (event) => {
+      state.filters.tertiary = event.target.value;
+      updateDashboard();
+    });
+
+    document.getElementById('btnLimpar')?.addEventListener('click', () => {
+      resetDashboardFilters();
+      updateDashboard();
+    });
+
+    document.getElementById('clearDashboardReportsButton')?.addEventListener('click', () => {
+      clearFinanceData();
+      state.payload = null;
+      resetDashboardFilters();
+      window.location.href = 'admin.html';
+    });
   }
 
-  function classifyUpcoming(days) {
-    if (days <= 3) return 'urgente';
-    if (days <= 7) return 'atenção';
-    if (days <= 15) return 'normal';
-    return 'futuro';
+  function switchPanel(panel) {
+    if (!PANEL_META[panel] || panel === state.panel) return;
+
+    state.panel = panel;
+    resetDashboardFilters();
+    highlightPanelLinks(state.panel);
+    window.history.replaceState({}, '', `dashboard.html?panel=${panel}`);
+    updateDashboard();
   }
 
-  function classifyDelay(days) {
-    if (days <= 15) return 'leve';
-    if (days <= 30) return 'moderado';
-    if (days <= 60) return 'grave';
-    return 'crítico';
+  function resetDashboardFilters() {
+    state.filters.calendar = '';
+    state.filters.primary = 'todos';
+    state.filters.secondary = 'todos';
+    state.filters.tertiary = 'todos';
+    state.clickedPrimary = null;
+    setCalendarValue('filterCalendar', '');
+    setSelectValue('filterPrimary', 'todos');
+    setSelectValue('filterSecondary', 'todos');
+    setSelectValue('filterTertiary', 'todos');
   }
 
-  function calculateDays(dateValue, baseDate) {
-    const date = typeof dateValue === 'string' ? new Date(dateValue) : dateValue;
-    if (!date || Number.isNaN(date.getTime())) return 0;
-    return Math.round((startOfDay(date) - startOfDay(baseDate)) / 86400000);
+  function updateDashboard() {
+    const meta = PANEL_META[state.panel];
+    setText('dashboardTitle', meta.title);
+    setText('dashboardSubtitle', meta.subtitle);
+    setText('footerNote', meta.note);
+
+    if (state.panel === 'receber') {
+      renderReceber();
+      return;
+    }
+
+    if (state.panel === 'inadimplentes') {
+      renderInadimplentes();
+      return;
+    }
+
+    renderFaturamento();
   }
 
-  function startOfDay(date) {
-    const normalized = new Date(date);
-    normalized.setHours(0, 0, 0, 0);
-    return normalized;
+  function renderFaturamento() {
+    const rows = state.payload?.tables?.tb_projecoes || [];
+    const periods = unique(rows.map((row) => row.periodo).filter(Boolean)).sort().reverse();
+    const unidades = unique(rows.map((row) => row.unidade).filter(Boolean)).sort(localeSort);
+    const tipos = ['todos', 'quantidade', 'faturamento'];
+
+    fillCalendarInput('filterCalendarLabel', 'filterCalendar', 'Filtro por calendário', 'month', state.filters.calendar, rows.map((row) => extractMonthKey(row.periodo)));
+    fillSelect('filterPrimary', 'filterPrimaryLabel', 'Filtro por Data', periods, state.filters.primary, 'Todas as datas');
+    fillSelect('filterSecondary', 'filterSecondaryLabel', 'Filtro por Unidade', unidades, state.filters.secondary, 'Todas as unidades');
+    fillSelect('filterTertiary', 'filterTertiaryLabel', 'Filtro por Tipo', tipos, state.filters.tertiary, 'Todos');
+
+    const filtered = rows.filter((row) => {
+      const calendarOk = !state.filters.calendar || extractMonthKey(row.periodo) === state.filters.calendar;
+      const periodOk = state.filters.primary === 'todos' || row.periodo === state.filters.primary;
+      const selectedUnit = state.clickedPrimary || state.filters.secondary;
+      const unitOk = selectedUnit === 'todos' || row.unidade === selectedUnit;
+      return calendarOk && periodOk && unitOk;
+    });
+
+    const aggregated = aggregateFaturamento(filtered);
+    const totals = aggregated.reduce((accumulator, item) => ({
+      volumeRealizado: accumulator.volumeRealizado + item.volumeRealizado,
+      volumeProjetado: accumulator.volumeProjetado + item.volumeProjetado,
+      faturamentoRealizado: accumulator.faturamentoRealizado + item.faturamentoRealizado,
+      faturamentoProjetado: accumulator.faturamentoProjetado + item.faturamentoProjetado,
+      arquivos: accumulator.arquivos
+    }), {
+      volumeRealizado: 0,
+      volumeProjetado: 0,
+      faturamentoRealizado: 0,
+      faturamentoProjetado: 0,
+      arquivos: state.payload?.processedFiles?.length || 0
+    });
+
+    const volumePercent = totals.volumeProjetado ? (totals.volumeRealizado / totals.volumeProjetado) * 100 : 0;
+    const faturamentoPercent = totals.faturamentoProjetado ? (totals.faturamentoRealizado / totals.faturamentoProjetado) * 100 : 0;
+
+    renderMiniCards([
+      { label: 'Arquivos', value: totals.arquivos },
+      { label: 'tb_projecoes', value: filtered.length },
+      { label: 'Unidades', value: aggregated.length },
+      { label: 'Períodos', value: unique(filtered.map((row) => row.periodo).filter(Boolean)).length },
+      {
+        label: 'Filtro ativo',
+        value: state.clickedPrimary || (state.filters.secondary !== 'todos' ? state.filters.secondary : 'Todos')
+      }
+    ]);
+
+    renderBigCards([
+      { title: 'Volume realizado', value: formatCompactNumber(totals.volumeRealizado), subbar: `${formatPercent(volumePercent)} da meta`, tone: 'green' },
+      { title: 'Meta de volume', value: formatCompactNumber(totals.volumeProjetado), subbar: `${formatCompactNumber(totals.volumeProjetado)} m³`, tone: 'green' },
+      { title: 'Faturamento realizado', value: formatCurrency(totals.faturamentoRealizado), subbar: `${formatCurrency(totals.faturamentoProjetado - totals.faturamentoRealizado)} abaixo da meta`, tone: 'orange' },
+      { title: 'Meta de faturamento', value: formatCurrency(totals.faturamentoProjetado), subbar: formatPercent(faturamentoPercent), tone: 'blue' }
+    ]);
+
+    renderDualBarLineCharts({
+      primaryTitle: 'Comparação de <span class="orange">Volume</span>',
+      secondaryTitle: 'Comparação de <span class="blue">Faturamento</span>',
+      labels: aggregated.map((item) => item.unidade),
+      primaryBarsA: aggregated.map((item) => item.volumeRealizado),
+      primaryBarsB: aggregated.map((item) => item.volumeProjetado),
+      primaryLine: aggregated.map((item) => item.volumePercentual),
+      secondaryBarsA: aggregated.map((item) => item.faturamentoRealizado),
+      secondaryBarsB: aggregated.map((item) => item.faturamentoProjetado),
+      secondaryLine: aggregated.map((item) => item.faturamentoPercentual),
+      primaryMode: 'number',
+      secondaryMode: 'money',
+      primarySummary: [
+        { label: 'Volume realizado', value: `${formatCompactNumber(totals.volumeRealizado)} m³`, className: 'accent' },
+        { label: 'Meta de volume', value: `${formatCompactNumber(totals.volumeProjetado)} m³`, className: 'green-txt' },
+        { label: '% atingido', value: formatPercent(volumePercent), className: 'green-txt' }
+      ],
+      secondarySummary: [
+        { label: 'Faturamento realizado', value: formatCurrency(totals.faturamentoRealizado), className: 'accent' },
+        { label: 'Meta de faturamento', value: formatCurrency(totals.faturamentoProjetado), className: 'blue-txt' },
+        { label: '% atingido', value: formatPercent(faturamentoPercent), className: 'blue-txt' }
+      ]
+    });
+
+    renderTable('Primary', 'Quantidade', [
+      'Unidade de Negócio',
+      'Volume Realizado',
+      'Volume Médio / Dia',
+      'Volume Projetado',
+      'Diferença',
+      '% Atingido'
+    ], aggregated.map((item) => [
+      escapeHtml(item.unidade),
+      numericCell(formatCompactNumber(item.volumeRealizado)),
+      numericCell(formatCompactNumber(item.volumeMedio)),
+      numericCell(formatCompactNumber(item.volumeProjetado), 'green-txt'),
+      numericCell(formatCompactNumber(item.volumeRealizado - item.volumeProjetado), item.volumeRealizado - item.volumeProjetado < 0 ? 'danger-txt' : 'green-txt'),
+      numericCell(formatPercent(item.volumePercentual), 'accent')
+    ]));
+
+    renderTable('Secondary', 'Faturamento', [
+      'Unidade de Negócio',
+      'Faturamento Realizado',
+      'Faturamento Médio / Dia',
+      'Faturamento Projetado',
+      'Diferença',
+      '% Atingido'
+    ], aggregated.map((item) => [
+      escapeHtml(item.unidade),
+      numericCell(formatCurrency(item.faturamentoRealizado)),
+      numericCell(formatCurrency(item.faturamentoMedio)),
+      numericCell(formatCurrency(item.faturamentoProjetado), 'blue-txt'),
+      numericCell(formatCurrency(item.faturamentoRealizado - item.faturamentoProjetado), item.faturamentoRealizado - item.faturamentoProjetado < 0 ? 'danger-txt' : 'green-txt'),
+      numericCell(formatPercent(item.faturamentoPercentual), 'accent')
+    ]));
+
+    togglePanelSections(state.filters.tertiary);
   }
 
-  function findRowIndex(rows, keyword) {
-    return rows.findIndex((row) => row.some((cell) => normalizeText(cell).includes(normalizeText(keyword))));
+  function renderReceber() {
+    const rows = state.payload?.tables?.tb_a_receber || [];
+    const clientes = unique(rows.map((row) => row.cliente).filter(Boolean)).sort(localeSort);
+    const portadores = unique(rows.map((row) => row.portador).filter(Boolean)).sort(localeSort);
+    const modos = ['todos', 'cliente', 'portador'];
+
+    fillCalendarInput('filterCalendarLabel', 'filterCalendar', 'Calendário de vencimento', 'date', state.filters.calendar, rows.map((row) => toDateInputValue(row.vencimento)));
+    fillSelect('filterPrimary', 'filterPrimaryLabel', 'Filtro por Cliente', clientes, state.filters.primary, 'Todos os clientes');
+    fillSelect('filterSecondary', 'filterSecondaryLabel', 'Filtro por Portador', portadores, state.filters.secondary, 'Todos os portadores');
+    fillSelect('filterTertiary', 'filterTertiaryLabel', 'Filtro por Visão', modos, state.filters.tertiary, 'Todos');
+
+    const filtered = rows.filter((row) => {
+      const calendarOk = !state.filters.calendar || toDateInputValue(row.vencimento) === state.filters.calendar;
+      const clienteRef = state.clickedPrimary || state.filters.primary;
+      const clienteOk = clienteRef === 'todos' || row.cliente === clienteRef;
+      const portadorOk = state.filters.secondary === 'todos' || row.portador === state.filters.secondary;
+      return calendarOk && clienteOk && portadorOk;
+    });
+
+    const byCliente = aggregateByKey(filtered, 'cliente', 'saldo');
+    const byPortador = aggregateByKey(filtered, 'portador', 'saldo');
+    const total = sum(filtered, 'saldo');
+
+    renderMiniCards([
+      { label: 'Arquivos', value: state.payload?.processedFiles?.length || 0 },
+      { label: 'tb_a_receber', value: filtered.length },
+      { label: 'Clientes', value: byCliente.length },
+      { label: 'Portadores', value: byPortador.length },
+      { label: 'Títulos', value: filtered.length }
+    ]);
+
+    renderBigCards([
+      { title: 'Total a receber', value: formatCurrency(total), subbar: `${byCliente.length} clientes`, tone: 'green' },
+      { title: 'Ticket médio', value: formatCurrency(filtered.length ? total / filtered.length : 0), subbar: `${filtered.length} títulos`, tone: 'green' },
+      { title: 'Maior cliente', value: formatCurrency(byCliente[0]?.value || 0), subbar: escapeHtml(byCliente[0]?.label || 'Sem cliente'), tone: 'orange' },
+      { title: 'Maior portador', value: formatCurrency(byPortador[0]?.value || 0), subbar: escapeHtml(byPortador[0]?.label || 'Sem portador'), tone: 'blue' }
+    ]);
+
+    renderDualBarCharts({
+      primaryTitle: 'Carteira por <span class="orange">Cliente</span>',
+      secondaryTitle: 'Carteira por <span class="blue">Portador</span>',
+      primaryLabels: byCliente.slice(0, 8).map((item) => item.label),
+      primaryValues: byCliente.slice(0, 8).map((item) => item.value),
+      secondaryLabels: byPortador.slice(0, 8).map((item) => item.label),
+      secondaryValues: byPortador.slice(0, 8).map((item) => item.value),
+      mode: 'money',
+      primarySummary: [
+        { label: 'Total carteira', value: formatCurrency(total), className: 'accent' },
+        { label: 'Clientes', value: String(byCliente.length), className: 'green-txt' },
+        { label: 'Portadores', value: String(byPortador.length), className: 'green-txt' }
+      ],
+      secondarySummary: [
+        { label: 'Maior cliente', value: formatCurrency(byCliente[0]?.value || 0), className: 'accent' },
+        { label: 'Maior portador', value: formatCurrency(byPortador[0]?.value || 0), className: 'blue-txt' },
+        { label: 'Títulos', value: String(filtered.length), className: 'blue-txt' }
+      ]
+    });
+
+    renderTable('Primary', 'Títulos por cliente', [
+      'Cliente',
+      'Valor total',
+      'Qtd. títulos'
+    ], groupRows(filtered, 'cliente').map((item) => [
+      escapeHtml(item.label),
+      numericCell(formatCurrency(item.total), 'accent'),
+      numericCell(String(item.count))
+    ]));
+
+    renderTable('Secondary', 'Títulos por portador', [
+      'Portador',
+      'Valor total',
+      'Qtd. títulos'
+    ], groupRows(filtered, 'portador').map((item) => [
+      escapeHtml(item.label),
+      numericCell(formatCurrency(item.total), 'blue-txt'),
+      numericCell(String(item.count))
+    ]));
+
+    togglePanelSections(state.filters.tertiary === 'cliente' ? 'quantidade' : state.filters.tertiary === 'portador' ? 'faturamento' : 'todos');
   }
 
-  function valueAt(row, index) {
-    return index === undefined ? '' : row[index];
+  function renderInadimplentes() {
+    const rows = state.payload?.tables?.tb_inadimplentes || [];
+    const clientes = unique(rows.map((row) => row.cliente).filter(Boolean)).sort(localeSort);
+    const faixas = unique(rows.map((row) => row.faixa_atraso).filter(Boolean)).sort(localeSort);
+    const modos = ['todos', 'cliente', 'faixa'];
+
+    fillCalendarInput('filterCalendarLabel', 'filterCalendar', 'Calendário de vencimento', 'date', state.filters.calendar, rows.map((row) => toDateInputValue(row.vencimento)));
+    fillSelect('filterPrimary', 'filterPrimaryLabel', 'Filtro por Cliente', clientes, state.filters.primary, 'Todos os clientes');
+    fillSelect('filterSecondary', 'filterSecondaryLabel', 'Filtro por Faixa', faixas, state.filters.secondary, 'Todas as faixas');
+    fillSelect('filterTertiary', 'filterTertiaryLabel', 'Filtro por Visão', modos, state.filters.tertiary, 'Todos');
+
+    const filtered = rows.filter((row) => {
+      const calendarOk = !state.filters.calendar || toDateInputValue(row.vencimento) === state.filters.calendar;
+      const clienteRef = state.clickedPrimary || state.filters.primary;
+      const clienteOk = clienteRef === 'todos' || row.cliente === clienteRef;
+      const faixaOk = state.filters.secondary === 'todos' || row.faixa_atraso === state.filters.secondary;
+      return calendarOk && clienteOk && faixaOk;
+    });
+
+    const byCliente = aggregateByKey(filtered, 'cliente', 'saldo');
+    const byFaixa = aggregateByKey(filtered, 'faixa_atraso', 'saldo');
+    const total = sum(filtered, 'saldo');
+
+    renderMiniCards([
+      { label: 'Arquivos', value: state.payload?.processedFiles?.length || 0 },
+      { label: 'tb_inadimplentes', value: filtered.length },
+      { label: 'Clientes', value: byCliente.length },
+      { label: 'Faixas', value: byFaixa.length },
+      { label: 'Ticket médio', value: formatCurrency(filtered.length ? total / filtered.length : 0) }
+    ]);
+
+    renderBigCards([
+      { title: 'Total inadimplente', value: formatCurrency(total), subbar: `${byCliente.length} clientes`, tone: 'green' },
+      { title: 'Ticket médio', value: formatCurrency(filtered.length ? total / filtered.length : 0), subbar: `${filtered.length} títulos`, tone: 'green' },
+      { title: 'Maior cliente', value: formatCurrency(byCliente[0]?.value || 0), subbar: escapeHtml(byCliente[0]?.label || 'Sem cliente'), tone: 'orange' },
+      { title: 'Faixa crítica', value: formatCurrency(byFaixa[0]?.value || 0), subbar: escapeHtml(byFaixa[0]?.label || 'Sem faixa'), tone: 'blue' }
+    ]);
+
+    renderDualBarCharts({
+      primaryTitle: 'Inadimplência por <span class="orange">Cliente</span>',
+      secondaryTitle: 'Inadimplência por <span class="blue">Faixa</span>',
+      primaryLabels: byCliente.slice(0, 8).map((item) => item.label),
+      primaryValues: byCliente.slice(0, 8).map((item) => item.value),
+      secondaryLabels: byFaixa.slice(0, 8).map((item) => item.label),
+      secondaryValues: byFaixa.slice(0, 8).map((item) => item.value),
+      mode: 'money',
+      primarySummary: [
+        { label: 'Total vencido', value: formatCurrency(total), className: 'accent' },
+        { label: 'Clientes', value: String(byCliente.length), className: 'green-txt' },
+        { label: 'Faixas', value: String(byFaixa.length), className: 'green-txt' }
+      ],
+      secondarySummary: [
+        { label: 'Maior cliente', value: formatCurrency(byCliente[0]?.value || 0), className: 'accent' },
+        { label: 'Faixa crítica', value: formatCurrency(byFaixa[0]?.value || 0), className: 'blue-txt' },
+        { label: 'Títulos', value: String(filtered.length), className: 'blue-txt' }
+      ]
+    });
+
+    renderTable('Primary', 'Inadimplência por cliente', [
+      'Cliente',
+      'Valor total',
+      'Qtd. títulos'
+    ], groupRows(filtered, 'cliente').map((item) => [
+      escapeHtml(item.label),
+      numericCell(formatCurrency(item.total), 'accent'),
+      numericCell(String(item.count))
+    ]));
+
+    renderTable('Secondary', 'Inadimplência por faixa', [
+      'Faixa',
+      'Valor total',
+      'Qtd. títulos'
+    ], groupRows(filtered, 'faixa_atraso').map((item) => [
+      escapeHtml(item.label),
+      numericCell(formatCurrency(item.total), 'blue-txt'),
+      numericCell(String(item.count))
+    ]));
+
+    togglePanelSections(state.filters.tertiary === 'cliente' ? 'quantidade' : state.filters.tertiary === 'faixa' ? 'faturamento' : 'todos');
   }
 
-  function hasNumericValues(row) {
-    return Object.values(row).some((value) => typeof value === 'number' && value > 0);
+  function renderMiniCards(items) {
+    const labels = ['miniLabel1', 'miniLabel2', 'miniLabel3', 'miniLabel4'];
+    const values = ['miniValue1', 'miniValue2', 'miniValue3', 'miniValue4'];
+    setText('miniArquivos', String(items[0]?.value ?? 0));
+    labels.forEach((id, index) => setText(id, items[index + 1]?.label || '-'));
+    values.forEach((id, index) => setText(id, String(items[index + 1]?.value ?? 0)));
   }
 
-  function isSeparatorRow(values) {
-    return values.every((value) => /^[-_=]+$/.test(value));
+  function renderBigCards(cards) {
+    const container = document.getElementById('bigCardsRow');
+    if (!container) return;
+    container.innerHTML = cards.map((card) => `
+      <div class="big-card bg-${escapeHtml(card.tone)}">
+        <div class="title">${escapeHtml(card.title)}</div>
+        <div class="value">${escapeHtml(card.value)}</div>
+        <div class="subbar">${escapeHtml(card.subbar)}</div>
+      </div>
+    `).join('');
   }
 
-  function isLikelyClientHeader(values) {
-    if (values.length > 2) return false;
-    const text = values.join(' ').trim();
-    return Boolean(text) && !parseDate(text) && parseBrazilianNumber(text) === 0;
+  function renderDualBarLineCharts(config) {
+    setHtml('chartPrimaryTitle', config.primaryTitle);
+    setHtml('chartSecondaryTitle', config.secondaryTitle);
+    renderSummary('chartPrimarySummary', config.primarySummary);
+    renderSummary('chartSecondarySummary', config.secondarySummary);
+
+    createChart('primary', 'chartPrimary', {
+      labels: config.labels,
+      datasets: [
+        makeBarDataset('Realizado', config.primaryBarsA, 'rgba(255, 122, 26, 0.82)', config.primaryMode),
+        makeBarDataset('Meta', config.primaryBarsB, 'rgba(158, 227, 125, 0.76)', config.primaryMode),
+        makeLineDataset('% Atingido', config.primaryLine, '#c4f3af')
+      ]
+    }, config.primaryMode);
+
+    createChart('secondary', 'chartSecondary', {
+      labels: config.labels,
+      datasets: [
+        makeBarDataset('Realizado', config.secondaryBarsA, 'rgba(255, 122, 26, 0.82)', config.secondaryMode),
+        makeBarDataset('Meta', config.secondaryBarsB, 'rgba(120, 201, 255, 0.78)', config.secondaryMode),
+        makeLineDataset('% Atingido', config.secondaryLine, '#9bd9ff')
+      ]
+    }, config.secondaryMode);
   }
 
-  function dedupeBy(rows, getKey) {
+  function renderDualBarCharts(config) {
+    setHtml('chartPrimaryTitle', config.primaryTitle);
+    setHtml('chartSecondaryTitle', config.secondaryTitle);
+    renderSummary('chartPrimarySummary', config.primarySummary);
+    renderSummary('chartSecondarySummary', config.secondarySummary);
+
+    createChart('primary', 'chartPrimary', {
+      labels: config.primaryLabels,
+      datasets: [makeBarDataset('Valor', config.primaryValues, 'rgba(255, 122, 26, 0.82)', config.mode)]
+    }, config.mode);
+
+    createChart('secondary', 'chartSecondary', {
+      labels: config.secondaryLabels,
+      datasets: [makeBarDataset('Valor', config.secondaryValues, 'rgba(120, 201, 255, 0.78)', config.mode)]
+    }, config.mode);
+  }
+
+  function createChart(slot, canvasId, data, mode) {
+    if (!window.Chart) return;
+    if (window.ChartDataLabels) {
+      window.Chart.register(window.ChartDataLabels);
+    }
+
+    state.charts[slot]?.destroy();
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+
+    state.charts[slot] = new window.Chart(canvas, {
+      type: 'bar',
+      data,
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        onClick: (_, elements, chart) => {
+          if (!elements?.length) return;
+          const label = chart.data.labels[elements[0].index];
+          state.clickedPrimary = state.clickedPrimary === label ? null : label;
+          updateDashboard();
+        },
+        plugins: {
+          legend: {
+            labels: {
+              color: '#f5f7ff',
+              font: { weight: '700' }
+            }
+          },
+          tooltip: {
+            backgroundColor: 'rgba(11,16,32,0.96)',
+            borderColor: 'rgba(255,255,255,0.08)',
+            borderWidth: 1,
+            titleColor: '#fff',
+            bodyColor: '#dfe7ff',
+            callbacks: {
+              label(context) {
+                if (context.dataset.type === 'line') {
+                  return `${context.dataset.label}: ${formatPercent(context.raw)}`;
+                }
+                return `${context.dataset.label}: ${mode === 'money' ? formatCurrency(context.raw) : formatCompactNumber(context.raw)}`;
+              }
+            }
+          },
+          datalabels: {
+            display(context) {
+              return context.dataset.type !== 'line';
+            },
+            color: '#ffffff',
+            anchor: 'end',
+            align: 'top',
+            offset: 2,
+            clamp: true,
+            font: { weight: '700', size: 10 },
+            formatter(value, context) {
+              if (context.dataset.type === 'line') return formatPercent(value);
+              return mode === 'money' ? compactCurrency(value) : compactNumber(value);
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { color: '#d1d9ef', font: { size: 11 } },
+            grid: { color: 'rgba(255,255,255,0.04)' }
+          },
+          y: {
+            beginAtZero: true,
+            ticks: {
+              color: '#d1d9ef',
+              callback(value) {
+                return mode === 'money' ? compactCurrency(value) : compactNumber(value);
+              }
+            },
+            grid: { color: 'rgba(255,255,255,0.08)' }
+          },
+          y1: {
+            position: 'right',
+            beginAtZero: true,
+            display: data.datasets.some((dataset) => dataset.type === 'line'),
+            grid: { drawOnChartArea: false },
+            ticks: {
+              color: '#9bd9ff',
+              callback(value) {
+                return `${value}%`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function renderTable(suffix, title, headers, rows) {
+    setText(`table${suffix}Title`, title);
+    const thead = document.getElementById(`thead${suffix}`);
+    const tbody = document.getElementById(`tbody${suffix}`);
+    if (!thead || !tbody) return;
+
+    thead.innerHTML = `<tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>`;
+    tbody.innerHTML = rows.length
+      ? rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('')
+      : '<tr><td colspan="6">Sem dados disponíveis.</td></tr>';
+  }
+
+  function renderSummary(id, items) {
+    const element = document.getElementById(id);
+    if (!element) return;
+    element.innerHTML = items.map((item) => `
+      <div class="legend-box">
+        <span class="k">${escapeHtml(item.label)}</span>
+        <span class="v ${escapeHtml(item.className || '')}">${escapeHtml(item.value)}</span>
+      </div>
+    `).join('');
+  }
+
+  function togglePanelSections(mode) {
+    const hidePrimary = mode === 'faturamento';
+    const hideSecondary = mode === 'quantidade';
+
+    toggleDisplay('boxChartPrimary', !hidePrimary);
+    toggleDisplay('boxChartSecondary', !hideSecondary);
+    toggleDisplay('tableCardPrimary', !hidePrimary);
+    toggleDisplay('tableCardSecondary', !hideSecondary);
+  }
+
+  function aggregateFaturamento(rows) {
     const map = new Map();
     rows.forEach((row) => {
-      map.set(getKey(row), row);
+      const key = row.unidade || 'Sem unidade';
+      const current = map.get(key) || {
+        unidade: key,
+        volumeRealizado: 0,
+        volumeMedio: 0,
+        volumeProjetado: 0,
+        faturamentoRealizado: 0,
+        faturamentoMedio: 0,
+        faturamentoProjetado: 0,
+        volumePercentual: 0,
+        faturamentoPercentual: 0
+      };
+
+      current.volumeRealizado += Number(row.volume_realizado || 0);
+      current.volumeMedio += Number(row.volume_medio || 0);
+      current.volumeProjetado += Number(row.volume_projetado || 0);
+      current.faturamentoRealizado += Number(row.faturamento_realizado || 0);
+      current.faturamentoMedio += Number(row.faturamento_medio || 0);
+      current.faturamentoProjetado += Number(row.faturamento_projetado || 0);
+      current.volumePercentual = current.volumeProjetado ? (current.volumeRealizado / current.volumeProjetado) * 100 : 0;
+      current.faturamentoPercentual = current.faturamentoProjetado ? (current.faturamentoRealizado / current.faturamentoProjetado) * 100 : 0;
+      map.set(key, current);
     });
-    return [...map.values()];
+
+    return [...map.values()].sort((left, right) => right.faturamentoProjetado - left.faturamentoProjetado);
   }
 
-  function formatValue(value) {
-    if (typeof value === 'number') return value.toLocaleString('pt-BR');
-    if (String(value).includes('T') && !Number.isNaN(Date.parse(value))) return formatDateBR(value);
-    return value ?? '-';
+  function aggregateByKey(rows, key, valueKey) {
+    const grouped = new Map();
+    rows.forEach((row) => {
+      const label = row[key] || 'Sem grupo';
+      grouped.set(label, (grouped.get(label) || 0) + Number(row[valueKey] || 0));
+    });
+    return [...grouped.entries()].map(([label, value]) => ({ label, value })).sort((left, right) => right.value - left.value);
   }
 
-  function setMessage(text, status) {
-    const element = document.getElementById('processingMessage');
-    if (!element) return;
-    element.textContent = text;
-    element.className = `status-banner is-${status}`;
+  function groupRows(rows, key) {
+    const grouped = new Map();
+    rows.forEach((row) => {
+      const label = row[key] || 'Sem grupo';
+      const current = grouped.get(label) || { label, total: 0, count: 0 };
+      current.total += Number(row.saldo || 0);
+      current.count += 1;
+      grouped.set(label, current);
+    });
+    return [...grouped.values()].sort((left, right) => right.total - left.total);
+  }
+
+  function numericCell(value, className) {
+    const classes = ['num'];
+    if (className) classes.push(className);
+    return `<span class="${classes.join(' ')}">${escapeHtml(value)}</span>`;
+  }
+
+  function makeBarDataset(label, data, color, mode) {
+    return {
+      label,
+      data,
+      backgroundColor: color,
+      borderColor: color,
+      borderWidth: 1,
+      borderRadius: 8,
+      customMode: mode
+    };
+  }
+
+  function makeLineDataset(label, data, color) {
+    return {
+      type: 'line',
+      label,
+      data,
+      yAxisID: 'y1',
+      borderColor: color,
+      backgroundColor: color,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      tension: 0.35
+    };
+  }
+
+  function fillSelect(selectId, labelId, label, options, selectedValue, allLabel) {
+    setText(labelId, label);
+    const select = document.getElementById(selectId);
+    if (!select) return;
+
+    const uniqueOptions = unique(options.filter(Boolean));
+    const optionMarkup = [`<option value="todos">${escapeHtml(allLabel)}</option>`]
+      .concat(uniqueOptions.map((option) => `<option value="${escapeHtml(option)}"${option === selectedValue ? ' selected' : ''}>${escapeHtml(option)}</option>`))
+      .join('');
+    select.innerHTML = optionMarkup;
+    if (!selectedValue) select.value = 'todos';
+  }
+
+  function fillCalendarInput(labelId, inputId, label, type, selectedValue, options) {
+    setText(labelId, label);
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    input.type = type;
+    const normalizedOptions = unique(options.filter(Boolean)).sort();
+    input.min = normalizedOptions[0] || '';
+    input.max = normalizedOptions[normalizedOptions.length - 1] || '';
+    input.value = selectedValue || '';
+  }
+
+  function setSelectValue(id, value) {
+    const element = document.getElementById(id);
+    if (element) element.value = value;
+  }
+
+  function setCalendarValue(id, value) {
+    const element = document.getElementById(id);
+    if (element) element.value = value;
+  }
+
+  function setupLogout() {
+    document.querySelectorAll('#logoutButton').forEach((button) => {
+      button.addEventListener('click', () => {
+        clearSession();
+        window.location.href = 'index.html';
+      });
+    });
+  }
+
+  function ensureAuthorized(requiredRole) {
+    const session = getSession();
+    if (!session) {
+      window.location.replace('index.html');
+      return null;
+    }
+    if (requiredRole === 'admin' && session.role !== 'admin') {
+      window.location.replace('portal.html');
+      return null;
+    }
+    return session;
+  }
+
+  function highlightPanelLinks(panel) {
+    document.querySelectorAll('[data-panel-button]').forEach((button) => {
+      const isActive = button.dataset.panelButton === panel;
+      button.classList.toggle('is-active', isActive);
+      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
+  }
+
+  function getRequestedPanel() {
+    const panel = new URLSearchParams(window.location.search).get('panel');
+    return panel && PANEL_META[panel] ? panel : 'faturamento';
   }
 
   function setText(id, value) {
     const element = document.getElementById(id);
-    if (element) element.textContent = value;
+    if (element) element.textContent = value || '';
+  }
+
+  function setHtml(id, value) {
+    const element = document.getElementById(id);
+    if (element) element.innerHTML = value || '';
+  }
+
+  function toggleDisplay(id, visible) {
+    const element = document.getElementById(id);
+    if (element) element.style.display = visible ? '' : 'none';
+  }
+
+  function unique(items) {
+    return [...new Set(items)];
+  }
+
+  function extractMonthKey(value) {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+
+    if (/^\d{4}-\d{2}$/.test(raw)) return raw;
+
+    const yearMonth = raw.match(/^(\d{4})[\/.-](\d{1,2})$/);
+    if (yearMonth) return `${yearMonth[1]}-${String(yearMonth[2]).padStart(2, '0')}`;
+
+    const monthYear = raw.match(/^(\d{1,2})[\/.-](\d{4})$/);
+    if (monthYear) return `${monthYear[2]}-${String(monthYear[1]).padStart(2, '0')}`;
+
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) {
+      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    return '';
+  }
+
+  function toDateInputValue(value) {
+    const date = value ? new Date(value) : null;
+    if (!date || Number.isNaN(date.getTime())) return '';
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function sum(rows, key) {
+    return rows.reduce((total, row) => total + Number(row[key] || 0), 0);
+  }
+
+  function localeSort(left, right) {
+    return left.localeCompare(right, 'pt-BR', { sensitivity: 'base' });
+  }
+
+  function compactNumber(value) {
+    return new Intl.NumberFormat('pt-BR', {
+      notation: 'compact',
+      maximumFractionDigits: 1
+    }).format(Number(value || 0));
+  }
+
+  function compactCurrency(value) {
+    return new Intl.NumberFormat('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+      notation: 'compact',
+      maximumFractionDigits: 1
+    }).format(Number(value || 0));
+  }
+
+  function formatCompactNumber(value) {
+    return Number(value || 0).toLocaleString('pt-BR');
+  }
+
+  function formatPercent(value) {
+    return `${Number(value || 0).toLocaleString('pt-BR', {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1
+    })}%`;
   }
 })();
