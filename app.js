@@ -4,6 +4,7 @@
     saveSession,
     clearSession,
     getFinanceData,
+    clearFinanceData,
     formatCurrency,
     formatDateBR,
     formatDateTimeBR,
@@ -11,55 +12,41 @@
   } = window.FinanceiroUtils;
 
   const CREDENTIALS = {
-    admin: { password: 'admin123', role: 'admin', redirect: 'admin.html' },
-    usuario: { password: '123', role: 'usuario', redirect: 'dashboard.html' }
+    admin: { password: 'admin123', role: 'admin' },
+    usuario: { password: '123', role: 'usuario' }
   };
 
-  const TAB_CONFIG = {
+  const PANEL_META = {
     faturamento: {
-      title: 'Faturamento',
-      eyebrow: 'tb_projecoes',
-      subtitle: 'Painel executivo de faturamento',
-      description: 'Visão profissional de volumes, faturamento realizado e projetado com filtros dinâmicos por período.',
-      chartTitle: 'Evolução de faturamento',
-      tableTitle: 'Detalhamento de faturamento'
+      title: 'Painel de Projeções e Faturamento',
+      subtitle: 'Volume realizado, metas e faturamento por unidade de negócio.',
+      note: 'Clique em uma barra ou ponto do gráfico para filtrar por unidade.'
     },
     receber: {
-      title: 'A Receber',
-      eyebrow: 'tb_a_receber',
-      subtitle: 'Painel executivo de contas a receber',
-      description: 'Carteira a receber com foco em clientes, portadores, vencimentos e títulos em aberto.',
-      chartTitle: 'Carteira a receber',
-      tableTitle: 'Detalhamento de contas a receber'
+      title: 'Painel de Contas a Receber',
+      subtitle: 'Carteira futura por cliente e portador com visão gerencial.',
+      note: 'Clique em uma barra do gráfico para filtrar por cliente ou portador.'
     },
     inadimplentes: {
-      title: 'Inadimplentes',
-      eyebrow: 'tb_inadimplentes',
-      subtitle: 'Painel executivo de inadimplentes',
-      description: 'Acompanhamento de valores vencidos, clientes inadimplentes e criticidade por atraso.',
-      chartTitle: 'Carteira inadimplente',
-      tableTitle: 'Detalhamento de inadimplência'
+      title: 'Painel de Inadimplentes',
+      subtitle: 'Valores vencidos por cliente e por faixa de atraso.',
+      note: 'Clique em uma barra do gráfico para filtrar por cliente ou faixa.'
     }
   };
 
-  const MONTH_LABELS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-
   const state = {
-    abaAtual: 'faturamento',
     payload: null,
-    charts: new Map(),
-    tabela: {
-      sortKey: '',
-      sortDirection: 'desc',
-      page: 1,
-      rows: [],
-      columns: [],
-      renderRow: null
+    panel: 'faturamento',
+    clickedPrimary: null,
+    filters: {
+      calendar: '',
+      primary: 'todos',
+      secondary: 'todos',
+      tertiary: 'todos'
     },
-    filtros: {
-      faturamento: { mes: '', ano: '', unidade: '', chartSelection: '' },
-      receber: { cliente: '', portador: '', chartSelection: '' },
-      inadimplentes: { cliente: '', faixa: '', chartSelection: '' }
+    charts: {
+      primary: null,
+      secondary: null
     }
   };
 
@@ -67,7 +54,8 @@
     const page = document.body.dataset.page;
 
     if (page === 'login') initLogin();
-    if (page === 'admin') initProtectedPage('admin');
+    if (page === 'portal') initPortal();
+    if (page === 'admin') ensureAuthorized('admin');
     if (page === 'dashboard') initDashboard();
 
     setupLogout();
@@ -75,8 +63,10 @@
 
   function initLogin() {
     const session = getSession();
-    if (session?.role === 'admin') window.location.replace('admin.html');
-    if (session?.role === 'usuario') window.location.replace('dashboard.html');
+    if (session) {
+      window.location.replace('portal.html');
+      return;
+    }
 
     const form = document.getElementById('loginForm');
     const message = document.getElementById('loginMessage');
@@ -88,616 +78,730 @@
       const credential = CREDENTIALS[username];
 
       if (!credential || credential.password !== password) {
-        message.textContent = 'Usuário ou senha inválidos.';
+        if (message) message.textContent = 'Usuário ou senha inválidos.';
         return;
       }
 
       saveSession({ username, role: credential.role, loginAt: new Date().toISOString() });
-      message.textContent = '';
-      window.location.href = credential.redirect;
+      window.location.href = 'portal.html';
     });
   }
 
-  function initProtectedPage(requiredRole) {
-    ensureAuthorized(requiredRole);
+  function initPortal() {
+    const session = ensureAuthorized();
+    if (!session) return;
+
+    const profile = document.getElementById('portalProfileLabel');
+    const adminLink = document.getElementById('portalAdminLink');
+
+    if (profile) {
+      profile.textContent = session.role === 'admin' ? 'Perfil: Administrador' : 'Perfil: Usuário';
+    }
+
+    if (adminLink && session.role === 'admin') {
+      adminLink.classList.remove('is-hidden');
+    }
   }
 
   function initDashboard() {
     const session = ensureAuthorized();
-    state.payload = getFinanceData();
+    if (!session) return;
 
-    setText('sessionRoleLabel', session?.role === 'admin' ? 'Administrador' : 'Usuário');
-    setText('dashboardUpdatedAt', `Atualizado em ${formatDateTimeBR(state.payload?.updatedAt)}`);
+    state.payload = getFinanceData();
+    state.panel = getRequestedPanel();
+    highlightPanelLinks(state.panel);
+
+    const adminLink = document.getElementById('dashboardAdminLink');
+    const clearReportsButton = document.getElementById('clearDashboardReportsButton');
+    if (session.role === 'admin') {
+      adminLink?.classList.remove('is-hidden');
+      clearReportsButton?.classList.remove('is-hidden');
+    }
 
     const emptyState = document.getElementById('dashboardEmptyState');
     if (!state.payload?.tables) {
-      emptyState?.classList.add('is-visible');
+      emptyState?.classList.remove('is-hidden');
       return;
     }
 
-    emptyState?.classList.remove('is-visible');
-    bindTabs();
-    document.getElementById('clearFiltersButton')?.addEventListener('click', limparFiltros);
-    trocarAba(state.abaAtual);
-  }
-
-  function bindTabs() {
-    document.querySelectorAll('[data-aba]').forEach((button) => {
-      button.addEventListener('click', () => trocarAba(button.dataset.aba));
-    });
-  }
-
-  function trocarAba(aba) {
-    state.abaAtual = aba;
-    state.tabela.page = 1;
-    state.tabela.sortKey = '';
-    state.tabela.sortDirection = 'desc';
-
-    document.querySelectorAll('[data-aba]').forEach((button) => {
-      button.classList.toggle('is-active', button.dataset.aba === aba);
-    });
-
-    const config = TAB_CONFIG[aba];
-    setText('dashboardSectionTitle', config.title);
-    setText('dashboardSectionEyebrow', config.eyebrow);
-    setText('dashboardSectionSubtitle', config.subtitle);
-    setText('dashboardSectionDescription', config.description);
-    setText('dashboardChartTitle', config.chartTitle);
-    setText('dashboardTableTitle', config.tableTitle);
-
+    emptyState?.classList.add('is-hidden');
+    bindDashboardEvents();
     updateDashboard();
   }
 
+  function bindDashboardEvents() {
+    document.querySelectorAll('[data-panel-button]').forEach((button) => {
+      button.addEventListener('click', () => {
+        switchPanel(button.dataset.panelButton);
+      });
+    });
+
+    document.getElementById('filterCalendar')?.addEventListener('change', (event) => {
+      state.filters.calendar = event.target.value;
+      state.clickedPrimary = null;
+      updateDashboard();
+    });
+
+    document.getElementById('filterPrimary')?.addEventListener('change', (event) => {
+      state.filters.primary = event.target.value;
+      state.clickedPrimary = null;
+      updateDashboard();
+    });
+
+    document.getElementById('filterSecondary')?.addEventListener('change', (event) => {
+      state.filters.secondary = event.target.value;
+      state.clickedPrimary = null;
+      updateDashboard();
+    });
+
+    document.getElementById('filterTertiary')?.addEventListener('change', (event) => {
+      state.filters.tertiary = event.target.value;
+      updateDashboard();
+    });
+
+    document.getElementById('btnLimpar')?.addEventListener('click', () => {
+      resetDashboardFilters();
+      updateDashboard();
+    });
+
+    document.getElementById('clearDashboardReportsButton')?.addEventListener('click', () => {
+      clearFinanceData();
+      state.payload = null;
+      resetDashboardFilters();
+      window.location.href = 'admin.html';
+    });
+  }
+
+  function switchPanel(panel) {
+    if (!PANEL_META[panel] || panel === state.panel) return;
+
+    state.panel = panel;
+    resetDashboardFilters();
+    highlightPanelLinks(state.panel);
+    window.history.replaceState({}, '', `dashboard.html?panel=${panel}`);
+    updateDashboard();
+  }
+
+  function resetDashboardFilters() {
+    state.filters.calendar = '';
+    state.filters.primary = 'todos';
+    state.filters.secondary = 'todos';
+    state.filters.tertiary = 'todos';
+    state.clickedPrimary = null;
+    setCalendarValue('filterCalendar', '');
+    setSelectValue('filterPrimary', 'todos');
+    setSelectValue('filterSecondary', 'todos');
+    setSelectValue('filterTertiary', 'todos');
+  }
+
   function updateDashboard() {
-    if (state.abaAtual === 'faturamento') {
-      updateFaturamento();
+    const meta = PANEL_META[state.panel];
+    setText('dashboardTitle', meta.title);
+    setText('dashboardSubtitle', meta.subtitle);
+    setText('footerNote', meta.note);
+
+    if (state.panel === 'receber') {
+      renderReceber();
       return;
     }
-    if (state.abaAtual === 'receber') {
-      updateReceber();
+
+    if (state.panel === 'inadimplentes') {
+      renderInadimplentes();
       return;
     }
-    updateInadimplentes();
+
+    renderFaturamento();
   }
 
-  function updateFaturamento() {
+  function renderFaturamento() {
     const rows = state.payload?.tables?.tb_projecoes || [];
-    const filtros = state.filtros.faturamento;
-    const periods = rows.map((row) => parsePeriodo(row.periodo)).filter(Boolean);
-    const unidades = uniqueValues(rows, 'unidade');
+    const periods = unique(rows.map((row) => row.periodo).filter(Boolean)).sort().reverse();
+    const unidades = unique(rows.map((row) => row.unidade).filter(Boolean)).sort(localeSort);
+    const tipos = ['todos', 'quantidade', 'faturamento'];
 
-    renderFilters([
-      { id: 'mes', label: 'Mês', type: 'select', value: filtros.mes, options: uniqueOptions(periods.map((item) => ({ value: String(item.month).padStart(2, '0'), label: MONTH_LABELS[item.month - 1] }))) },
-      { id: 'ano', label: 'Ano', type: 'select', value: filtros.ano, options: uniqueOptions(periods.map((item) => ({ value: String(item.year), label: String(item.year) }))) },
-      { id: 'unidade', label: 'Unidade', type: 'select', value: filtros.unidade, options: unidades.map((value) => ({ value, label: value })) }
-    ], 'faturamento');
+    fillCalendarInput('filterCalendarLabel', 'filterCalendar', 'Filtro por calendário', 'month', state.filters.calendar, rows.map((row) => extractMonthKey(row.periodo)));
+    fillSelect('filterPrimary', 'filterPrimaryLabel', 'Filtro por Data', periods, state.filters.primary, 'Todas as datas');
+    fillSelect('filterSecondary', 'filterSecondaryLabel', 'Filtro por Unidade', unidades, state.filters.secondary, 'Todas as unidades');
+    fillSelect('filterTertiary', 'filterTertiaryLabel', 'Filtro por Tipo', tipos, state.filters.tertiary, 'Todos');
 
-    const filteredRows = rows.filter((row) => {
-      const periodo = parsePeriodo(row.periodo);
-      const mesOk = !filtros.mes || String(periodo?.month).padStart(2, '0') === filtros.mes;
-      const anoOk = !filtros.ano || String(periodo?.year) === filtros.ano;
-      const unidadeOk = !filtros.unidade || row.unidade === filtros.unidade;
-      const chartOk = !filtros.chartSelection || row.unidade === filtros.chartSelection || row.periodo === filtros.chartSelection;
-      return mesOk && anoOk && unidadeOk && chartOk;
+    const filtered = rows.filter((row) => {
+      const calendarOk = !state.filters.calendar || extractMonthKey(row.periodo) === state.filters.calendar;
+      const periodOk = state.filters.primary === 'todos' || row.periodo === state.filters.primary;
+      const selectedUnit = state.clickedPrimary || state.filters.secondary;
+      const unitOk = selectedUnit === 'todos' || row.unidade === selectedUnit;
+      return calendarOk && periodOk && unitOk;
     });
 
-    const summary = summarizeFaturamento(filteredRows);
-    renderCards([
-      { label: 'Total faturado', value: formatCurrency(summary.totalFaturado), accent: true },
-      { label: 'Projetado', value: formatCurrency(summary.totalProjetado) },
-      { label: 'Realizado', value: formatCurrency(summary.totalRealizado) },
-      { label: 'Registros', value: String(filteredRows.length) }
+    const aggregated = aggregateFaturamento(filtered);
+    const totals = aggregated.reduce((accumulator, item) => ({
+      volumeRealizado: accumulator.volumeRealizado + item.volumeRealizado,
+      volumeProjetado: accumulator.volumeProjetado + item.volumeProjetado,
+      faturamentoRealizado: accumulator.faturamentoRealizado + item.faturamentoRealizado,
+      faturamentoProjetado: accumulator.faturamentoProjetado + item.faturamentoProjetado,
+      arquivos: accumulator.arquivos
+    }), {
+      volumeRealizado: 0,
+      volumeProjetado: 0,
+      faturamentoRealizado: 0,
+      faturamentoProjetado: 0,
+      arquivos: state.payload?.processedFiles?.length || 0
+    });
+
+    const volumePercent = totals.volumeProjetado ? (totals.volumeRealizado / totals.volumeProjetado) * 100 : 0;
+    const faturamentoPercent = totals.faturamentoProjetado ? (totals.faturamentoRealizado / totals.faturamentoProjetado) * 100 : 0;
+
+    renderMiniCards([
+      { label: 'Arquivos', value: totals.arquivos },
+      { label: 'tb_projecoes', value: filtered.length },
+      { label: 'Unidades', value: aggregated.length },
+      { label: 'Períodos', value: unique(filtered.map((row) => row.periodo).filter(Boolean)).length },
+      {
+        label: 'Filtro ativo',
+        value: state.clickedPrimary || (state.filters.secondary !== 'todos' ? state.filters.secondary : 'Todos')
+      }
     ]);
 
-    setText('chart1Title', 'Faturamento realizado x projetado');
-    setText('chart2Title', 'Volume projetado por unidade');
+    renderBigCards([
+      { title: 'Volume realizado', value: formatCompactNumber(totals.volumeRealizado), subbar: `${formatPercent(volumePercent)} da meta`, tone: 'green' },
+      { title: 'Meta de volume', value: formatCompactNumber(totals.volumeProjetado), subbar: `${formatCompactNumber(totals.volumeProjetado)} m³`, tone: 'green' },
+      { title: 'Faturamento realizado', value: formatCurrency(totals.faturamentoRealizado), subbar: `${formatCurrency(totals.faturamentoProjetado - totals.faturamentoRealizado)} abaixo da meta`, tone: 'orange' },
+      { title: 'Meta de faturamento', value: formatCurrency(totals.faturamentoProjetado), subbar: formatPercent(faturamentoPercent), tone: 'blue' }
+    ]);
 
-    criarGrafico('chartPrimary', {
-      type: 'bar',
-      data: {
-        labels: summary.byUnidade.map((item) => item.label),
-        datasets: [
-          {
-            type: 'bar',
-            label: 'Realizado',
-            data: summary.byUnidade.map((item) => item.realizado),
-            backgroundColor: 'rgba(255, 122, 26, 0.82)',
-            borderRadius: 10
-          },
-          {
-            type: 'bar',
-            label: 'Projetado',
-            data: summary.byUnidade.map((item) => item.projetado),
-            backgroundColor: 'rgba(99, 132, 255, 0.72)',
-            borderRadius: 10
-          },
-          {
-            type: 'line',
-            label: '% atingido',
-            data: summary.byUnidade.map((item) => item.percentual),
-            borderColor: 'rgba(255, 208, 123, 1)',
-            backgroundColor: 'rgba(255, 208, 123, 0.15)',
-            yAxisID: 'y1',
-            tension: 0.35
-          }
-        ]
-      },
-      options: {
-        scales: {
-          x: buildAxisOptions('Unidade'),
-          y: buildValueAxis('Valores financeiros'),
-          y1: {
-            position: 'right',
-            beginAtZero: true,
-            grid: { display: false },
-            ticks: {
-              color: '#ffcf9a',
-              callback: (value) => `${Number(value || 0).toFixed(0)}%`
-            }
-          }
-        }
-      },
-      onClick: (label) => {
-        state.filtros.faturamento.chartSelection = state.filtros.faturamento.chartSelection === label ? '' : label;
-        updateDashboard();
-      }
-    });
-
-    criarGrafico('chartSecondary', {
-      type: 'bar',
-      data: {
-        labels: summary.byUnidade.map((item) => item.label),
-        datasets: [{
-          label: 'Volume projetado',
-          data: summary.byUnidade.map((item) => item.volumeProjetado),
-          backgroundColor: 'rgba(255, 208, 123, 0.78)',
-          borderRadius: 10
-        }]
-      },
-      options: {
-        scales: {
-          x: buildAxisOptions('Unidade'),
-          y: buildNumberAxis('Volume')
-        }
-      },
-      onClick: (label) => {
-        state.filtros.faturamento.chartSelection = state.filtros.faturamento.chartSelection === label ? '' : label;
-        updateDashboard();
-      }
-    });
-
-    renderManagedTable({
-      columns: [
-        { key: 'unidade', label: 'Unidade de negócio' },
-        { key: 'unidade_medida', label: 'Unidade de medida' },
-        { key: 'volume_realizado', label: 'Volume realizado', numeric: true },
-        { key: 'volume_projetado', label: 'Volume projetado', numeric: true },
-        { key: 'faturamento_realizado', label: 'Faturamento realizado', numeric: true },
-        { key: 'faturamento_projetado', label: 'Faturamento projetado', numeric: true }
+    renderDualBarLineCharts({
+      primaryTitle: 'Comparação de <span class="orange">Volume</span>',
+      secondaryTitle: 'Comparação de <span class="blue">Faturamento</span>',
+      labels: aggregated.map((item) => item.unidade),
+      primaryBarsA: aggregated.map((item) => item.volumeRealizado),
+      primaryBarsB: aggregated.map((item) => item.volumeProjetado),
+      primaryLine: aggregated.map((item) => item.volumePercentual),
+      secondaryBarsA: aggregated.map((item) => item.faturamentoRealizado),
+      secondaryBarsB: aggregated.map((item) => item.faturamentoProjetado),
+      secondaryLine: aggregated.map((item) => item.faturamentoPercentual),
+      primaryMode: 'number',
+      secondaryMode: 'money',
+      primarySummary: [
+        { label: 'Volume realizado', value: `${formatCompactNumber(totals.volumeRealizado)} m³`, className: 'accent' },
+        { label: 'Meta de volume', value: `${formatCompactNumber(totals.volumeProjetado)} m³`, className: 'green-txt' },
+        { label: '% atingido', value: formatPercent(volumePercent), className: 'green-txt' }
       ],
-      rows: summary.byUnidade.map((item) => ({
-        unidade: item.label,
-        unidade_medida: item.unidadeMedida,
-        volume_realizado: item.volumeRealizado,
-        volume_projetado: item.volumeProjetado,
-        faturamento_realizado: item.realizado,
-        faturamento_projetado: item.projetado
-      })),
-      renderRow: (row) => `
-        <tr>
-          <td>${escapeHtml(row.unidade)}</td>
-          <td>${escapeHtml(row.unidade_medida || '-')}</td>
-          <td class="numeric-cell">${escapeHtml(formatNumber(row.volume_realizado))}</td>
-          <td class="numeric-cell">${escapeHtml(formatNumber(row.volume_projetado))}</td>
-          <td class="numeric-cell">${escapeHtml(formatCurrency(row.faturamento_realizado))}</td>
-          <td class="numeric-cell">${escapeHtml(formatCurrency(row.faturamento_projetado))}</td>
-        </tr>
-      `,
-      defaultSortKey: 'faturamento_projetado'
+      secondarySummary: [
+        { label: 'Faturamento realizado', value: formatCurrency(totals.faturamentoRealizado), className: 'accent' },
+        { label: 'Meta de faturamento', value: formatCurrency(totals.faturamentoProjetado), className: 'blue-txt' },
+        { label: '% atingido', value: formatPercent(faturamentoPercent), className: 'blue-txt' }
+      ]
     });
+
+    renderTable('Primary', 'Quantidade', [
+      'Unidade de Negócio',
+      'Volume Realizado',
+      'Volume Médio / Dia',
+      'Volume Projetado',
+      'Diferença',
+      '% Atingido'
+    ], aggregated.map((item) => [
+      escapeHtml(item.unidade),
+      numericCell(formatCompactNumber(item.volumeRealizado)),
+      numericCell(formatCompactNumber(item.volumeMedio)),
+      numericCell(formatCompactNumber(item.volumeProjetado), 'green-txt'),
+      numericCell(formatCompactNumber(item.volumeRealizado - item.volumeProjetado), item.volumeRealizado - item.volumeProjetado < 0 ? 'danger-txt' : 'green-txt'),
+      numericCell(formatPercent(item.volumePercentual), 'accent')
+    ]));
+
+    renderTable('Secondary', 'Faturamento', [
+      'Unidade de Negócio',
+      'Faturamento Realizado',
+      'Faturamento Médio / Dia',
+      'Faturamento Projetado',
+      'Diferença',
+      '% Atingido'
+    ], aggregated.map((item) => [
+      escapeHtml(item.unidade),
+      numericCell(formatCurrency(item.faturamentoRealizado)),
+      numericCell(formatCurrency(item.faturamentoMedio)),
+      numericCell(formatCurrency(item.faturamentoProjetado), 'blue-txt'),
+      numericCell(formatCurrency(item.faturamentoRealizado - item.faturamentoProjetado), item.faturamentoRealizado - item.faturamentoProjetado < 0 ? 'danger-txt' : 'green-txt'),
+      numericCell(formatPercent(item.faturamentoPercentual), 'accent')
+    ]));
+
+    togglePanelSections(state.filters.tertiary);
   }
 
-  function updateReceber() {
+  function renderReceber() {
     const rows = state.payload?.tables?.tb_a_receber || [];
-    const filtros = state.filtros.receber;
+    const clientes = unique(rows.map((row) => row.cliente).filter(Boolean)).sort(localeSort);
+    const portadores = unique(rows.map((row) => row.portador).filter(Boolean)).sort(localeSort);
+    const modos = ['todos', 'cliente', 'portador'];
 
-    renderFilters([
-      { id: 'cliente', label: 'Cliente', type: 'select', value: filtros.cliente, options: uniqueValues(rows, 'cliente').map(optionObject) },
-      { id: 'portador', label: 'Portador', type: 'select', value: filtros.portador, options: uniqueValues(rows, 'portador').map(optionObject) }
-    ], 'receber');
+    fillCalendarInput('filterCalendarLabel', 'filterCalendar', 'Calendário de vencimento', 'date', state.filters.calendar, rows.map((row) => toDateInputValue(row.vencimento)));
+    fillSelect('filterPrimary', 'filterPrimaryLabel', 'Filtro por Cliente', clientes, state.filters.primary, 'Todos os clientes');
+    fillSelect('filterSecondary', 'filterSecondaryLabel', 'Filtro por Portador', portadores, state.filters.secondary, 'Todos os portadores');
+    fillSelect('filterTertiary', 'filterTertiaryLabel', 'Filtro por Visão', modos, state.filters.tertiary, 'Todos');
 
-    const filteredRows = rows.filter((row) => {
-      const clienteOk = !filtros.cliente || row.cliente === filtros.cliente;
-      const portadorOk = !filtros.portador || row.portador === filtros.portador;
-      const chartOk = !filtros.chartSelection || row.cliente === filtros.chartSelection;
-      return clienteOk && portadorOk && chartOk;
+    const filtered = rows.filter((row) => {
+      const calendarOk = !state.filters.calendar || toDateInputValue(row.vencimento) === state.filters.calendar;
+      const clienteRef = state.clickedPrimary || state.filters.primary;
+      const clienteOk = clienteRef === 'todos' || row.cliente === clienteRef;
+      const portadorOk = state.filters.secondary === 'todos' || row.portador === state.filters.secondary;
+      return calendarOk && clienteOk && portadorOk;
     });
 
-    const byCliente = aggregateMetric(filteredRows, 'cliente', 'saldo').slice(0, 10);
-    const byPortador = aggregateMetric(filteredRows, 'portador', 'saldo').slice(0, 10);
-    const total = sum(filteredRows, 'saldo');
+    const byCliente = aggregateByKey(filtered, 'cliente', 'saldo');
+    const byPortador = aggregateByKey(filtered, 'portador', 'saldo');
+    const total = sum(filtered, 'saldo');
 
-    renderCards([
-      { label: 'Total a receber', value: formatCurrency(total), accent: true },
-      { label: 'Total clientes', value: String(uniqueValues(filteredRows, 'cliente').length) },
-      { label: 'Total portador', value: String(uniqueValues(filteredRows, 'portador').length) },
-      { label: 'Quantidade títulos', value: String(filteredRows.length) }
+    renderMiniCards([
+      { label: 'Arquivos', value: state.payload?.processedFiles?.length || 0 },
+      { label: 'tb_a_receber', value: filtered.length },
+      { label: 'Clientes', value: byCliente.length },
+      { label: 'Portadores', value: byPortador.length },
+      { label: 'Títulos', value: filtered.length }
     ]);
 
-    setText('chart1Title', 'A receber por cliente');
-    setText('chart2Title', 'A receber por portador');
+    renderBigCards([
+      { title: 'Total a receber', value: formatCurrency(total), subbar: `${byCliente.length} clientes`, tone: 'green' },
+      { title: 'Ticket médio', value: formatCurrency(filtered.length ? total / filtered.length : 0), subbar: `${filtered.length} títulos`, tone: 'green' },
+      { title: 'Maior cliente', value: formatCurrency(byCliente[0]?.value || 0), subbar: escapeHtml(byCliente[0]?.label || 'Sem cliente'), tone: 'orange' },
+      { title: 'Maior portador', value: formatCurrency(byPortador[0]?.value || 0), subbar: escapeHtml(byPortador[0]?.label || 'Sem portador'), tone: 'blue' }
+    ]);
 
-    criarGrafico('chartPrimary', {
-      type: 'bar',
-      data: {
-        labels: byCliente.map((item) => item.label),
-        datasets: [{
-          label: 'Valor a receber',
-          data: byCliente.map((item) => item.value),
-          backgroundColor: 'rgba(255, 122, 26, 0.82)',
-          borderRadius: 10
-        }]
-      },
-      options: {
-        scales: {
-          x: buildAxisOptions('Cliente'),
-          y: buildValueAxis('Valor')
-        }
-      },
-      onClick: (label) => {
-        state.filtros.receber.chartSelection = state.filtros.receber.chartSelection === label ? '' : label;
-        updateDashboard();
-      }
-    });
-
-    criarGrafico('chartSecondary', {
-      type: 'bar',
-      data: {
-        labels: byPortador.map((item) => item.label),
-        datasets: [{
-          label: 'Valor a receber',
-          data: byPortador.map((item) => item.value),
-          backgroundColor: 'rgba(99, 132, 255, 0.72)',
-          borderRadius: 10
-        }]
-      },
-      options: {
-        scales: {
-          x: buildAxisOptions('Portador'),
-          y: buildValueAxis('Valor')
-        }
-      }
-    });
-
-    renderManagedTable({
-      columns: [
-        { key: 'cliente', label: 'Cliente' },
-        { key: 'saldo', label: 'Valor', numeric: true },
-        { key: 'vencimento', label: 'Vencimento' },
-        { key: 'portador', label: 'Portador' },
-        { key: 'classificacao_vencimento', label: 'Status' }
+    renderDualBarCharts({
+      primaryTitle: 'Carteira por <span class="orange">Cliente</span>',
+      secondaryTitle: 'Carteira por <span class="blue">Portador</span>',
+      primaryLabels: byCliente.slice(0, 8).map((item) => item.label),
+      primaryValues: byCliente.slice(0, 8).map((item) => item.value),
+      secondaryLabels: byPortador.slice(0, 8).map((item) => item.label),
+      secondaryValues: byPortador.slice(0, 8).map((item) => item.value),
+      mode: 'money',
+      primarySummary: [
+        { label: 'Total carteira', value: formatCurrency(total), className: 'accent' },
+        { label: 'Clientes', value: String(byCliente.length), className: 'green-txt' },
+        { label: 'Portadores', value: String(byPortador.length), className: 'green-txt' }
       ],
-      rows: filteredRows.map((row) => ({
-        cliente: row.cliente,
-        saldo: row.saldo,
-        vencimento: row.vencimento,
-        portador: row.portador,
-        classificacao_vencimento: row.classificacao_vencimento || 'A vencer'
-      })),
-      renderRow: (row) => `
-        <tr>
-          <td>${escapeHtml(row.cliente)}</td>
-          <td class="numeric-cell">${escapeHtml(formatCurrency(row.saldo))}</td>
-          <td>${escapeHtml(formatDateBR(row.vencimento))}</td>
-          <td>${escapeHtml(row.portador || '-')}</td>
-          <td>${escapeHtml(row.classificacao_vencimento || 'A vencer')}</td>
-        </tr>
-      `,
-      defaultSortKey: 'saldo'
+      secondarySummary: [
+        { label: 'Maior cliente', value: formatCurrency(byCliente[0]?.value || 0), className: 'accent' },
+        { label: 'Maior portador', value: formatCurrency(byPortador[0]?.value || 0), className: 'blue-txt' },
+        { label: 'Títulos', value: String(filtered.length), className: 'blue-txt' }
+      ]
     });
+
+    renderTable('Primary', 'Títulos por cliente', [
+      'Cliente',
+      'Valor total',
+      'Qtd. títulos'
+    ], groupRows(filtered, 'cliente').map((item) => [
+      escapeHtml(item.label),
+      numericCell(formatCurrency(item.total), 'accent'),
+      numericCell(String(item.count))
+    ]));
+
+    renderTable('Secondary', 'Títulos por portador', [
+      'Portador',
+      'Valor total',
+      'Qtd. títulos'
+    ], groupRows(filtered, 'portador').map((item) => [
+      escapeHtml(item.label),
+      numericCell(formatCurrency(item.total), 'blue-txt'),
+      numericCell(String(item.count))
+    ]));
+
+    togglePanelSections(state.filters.tertiary === 'cliente' ? 'quantidade' : state.filters.tertiary === 'portador' ? 'faturamento' : 'todos');
   }
 
-  function updateInadimplentes() {
+  function renderInadimplentes() {
     const rows = state.payload?.tables?.tb_inadimplentes || [];
-    const filtros = state.filtros.inadimplentes;
+    const clientes = unique(rows.map((row) => row.cliente).filter(Boolean)).sort(localeSort);
+    const faixas = unique(rows.map((row) => row.faixa_atraso).filter(Boolean)).sort(localeSort);
+    const modos = ['todos', 'cliente', 'faixa'];
 
-    renderFilters([
-      { id: 'cliente', label: 'Cliente', type: 'select', value: filtros.cliente, options: uniqueValues(rows, 'cliente').map(optionObject) },
-      { id: 'faixa', label: 'Faixa atraso', type: 'select', value: filtros.faixa, options: uniqueValues(rows, 'faixa_atraso').map(optionObject) }
-    ], 'inadimplentes');
+    fillCalendarInput('filterCalendarLabel', 'filterCalendar', 'Calendário de vencimento', 'date', state.filters.calendar, rows.map((row) => toDateInputValue(row.vencimento)));
+    fillSelect('filterPrimary', 'filterPrimaryLabel', 'Filtro por Cliente', clientes, state.filters.primary, 'Todos os clientes');
+    fillSelect('filterSecondary', 'filterSecondaryLabel', 'Filtro por Faixa', faixas, state.filters.secondary, 'Todas as faixas');
+    fillSelect('filterTertiary', 'filterTertiaryLabel', 'Filtro por Visão', modos, state.filters.tertiary, 'Todos');
 
-    const filteredRows = rows.filter((row) => {
-      const clienteOk = !filtros.cliente || row.cliente === filtros.cliente;
-      const faixaOk = !filtros.faixa || row.faixa_atraso === filtros.faixa;
-      const chartOk = !filtros.chartSelection || row.cliente === filtros.chartSelection;
-      return clienteOk && faixaOk && chartOk;
+    const filtered = rows.filter((row) => {
+      const calendarOk = !state.filters.calendar || toDateInputValue(row.vencimento) === state.filters.calendar;
+      const clienteRef = state.clickedPrimary || state.filters.primary;
+      const clienteOk = clienteRef === 'todos' || row.cliente === clienteRef;
+      const faixaOk = state.filters.secondary === 'todos' || row.faixa_atraso === state.filters.secondary;
+      return calendarOk && clienteOk && faixaOk;
     });
 
-    const byCliente = aggregateMetric(filteredRows, 'cliente', 'saldo').slice(0, 10);
-    const byFaixa = aggregateMetric(filteredRows, 'faixa_atraso', 'saldo');
-    const total = sum(filteredRows, 'saldo');
+    const byCliente = aggregateByKey(filtered, 'cliente', 'saldo');
+    const byFaixa = aggregateByKey(filtered, 'faixa_atraso', 'saldo');
+    const total = sum(filtered, 'saldo');
 
-    renderCards([
-      { label: 'Total inadimplente', value: formatCurrency(total), accent: true },
-      { label: 'Total clientes', value: String(uniqueValues(filteredRows, 'cliente').length) },
-      { label: 'Ticket médio', value: formatCurrency(filteredRows.length ? total / filteredRows.length : 0) },
-      { label: 'Quantidade títulos', value: String(filteredRows.length) }
+    renderMiniCards([
+      { label: 'Arquivos', value: state.payload?.processedFiles?.length || 0 },
+      { label: 'tb_inadimplentes', value: filtered.length },
+      { label: 'Clientes', value: byCliente.length },
+      { label: 'Faixas', value: byFaixa.length },
+      { label: 'Ticket médio', value: formatCurrency(filtered.length ? total / filtered.length : 0) }
     ]);
 
-    setText('chart1Title', 'Inadimplentes por cliente');
-    setText('chart2Title', 'Inadimplência por faixa');
+    renderBigCards([
+      { title: 'Total inadimplente', value: formatCurrency(total), subbar: `${byCliente.length} clientes`, tone: 'green' },
+      { title: 'Ticket médio', value: formatCurrency(filtered.length ? total / filtered.length : 0), subbar: `${filtered.length} títulos`, tone: 'green' },
+      { title: 'Maior cliente', value: formatCurrency(byCliente[0]?.value || 0), subbar: escapeHtml(byCliente[0]?.label || 'Sem cliente'), tone: 'orange' },
+      { title: 'Faixa crítica', value: formatCurrency(byFaixa[0]?.value || 0), subbar: escapeHtml(byFaixa[0]?.label || 'Sem faixa'), tone: 'blue' }
+    ]);
 
-    criarGrafico('chartPrimary', {
-      type: 'bar',
-      data: {
-        labels: byCliente.map((item) => item.label),
-        datasets: [{
-          label: 'Valor vencido',
-          data: byCliente.map((item) => item.value),
-          backgroundColor: 'rgba(255, 122, 26, 0.82)',
-          borderRadius: 10
-        }]
-      },
-      options: {
-        scales: {
-          x: buildAxisOptions('Cliente'),
-          y: buildValueAxis('Valor')
-        }
-      },
-      onClick: (label) => {
-        state.filtros.inadimplentes.chartSelection = state.filtros.inadimplentes.chartSelection === label ? '' : label;
-        updateDashboard();
-      }
-    });
-
-    criarGrafico('chartSecondary', {
-      type: 'bar',
-      data: {
-        labels: byFaixa.map((item) => item.label),
-        datasets: [{
-          label: 'Valor vencido',
-          data: byFaixa.map((item) => item.value),
-          backgroundColor: 'rgba(99, 132, 255, 0.72)',
-          borderRadius: 10
-        }]
-      },
-      options: {
-        scales: {
-          x: buildAxisOptions('Faixa'),
-          y: buildValueAxis('Valor')
-        }
-      }
-    });
-
-    renderManagedTable({
-      columns: [
-        { key: 'cliente', label: 'Cliente' },
-        { key: 'saldo', label: 'Valor', numeric: true },
-        { key: 'dias_em_atraso', label: 'Dias atraso', numeric: true },
-        { key: 'faixa_atraso', label: 'Status' }
+    renderDualBarCharts({
+      primaryTitle: 'Inadimplência por <span class="orange">Cliente</span>',
+      secondaryTitle: 'Inadimplência por <span class="blue">Faixa</span>',
+      primaryLabels: byCliente.slice(0, 8).map((item) => item.label),
+      primaryValues: byCliente.slice(0, 8).map((item) => item.value),
+      secondaryLabels: byFaixa.slice(0, 8).map((item) => item.label),
+      secondaryValues: byFaixa.slice(0, 8).map((item) => item.value),
+      mode: 'money',
+      primarySummary: [
+        { label: 'Total vencido', value: formatCurrency(total), className: 'accent' },
+        { label: 'Clientes', value: String(byCliente.length), className: 'green-txt' },
+        { label: 'Faixas', value: String(byFaixa.length), className: 'green-txt' }
       ],
-      rows: filteredRows.map((row) => ({
-        cliente: row.cliente,
-        saldo: row.saldo,
-        dias_em_atraso: row.dias_em_atraso,
-        faixa_atraso: row.faixa_atraso || 'Vencido'
-      })),
-      renderRow: (row) => `
-        <tr>
-          <td>${escapeHtml(row.cliente)}</td>
-          <td class="numeric-cell">${escapeHtml(formatCurrency(row.saldo))}</td>
-          <td class="numeric-cell">${escapeHtml(formatNumber(row.dias_em_atraso))}</td>
-          <td>${escapeHtml(row.faixa_atraso || 'Vencido')}</td>
-        </tr>
-      `,
-      defaultSortKey: 'saldo'
+      secondarySummary: [
+        { label: 'Maior cliente', value: formatCurrency(byCliente[0]?.value || 0), className: 'accent' },
+        { label: 'Faixa crítica', value: formatCurrency(byFaixa[0]?.value || 0), className: 'blue-txt' },
+        { label: 'Títulos', value: String(filtered.length), className: 'blue-txt' }
+      ]
     });
+
+    renderTable('Primary', 'Inadimplência por cliente', [
+      'Cliente',
+      'Valor total',
+      'Qtd. títulos'
+    ], groupRows(filtered, 'cliente').map((item) => [
+      escapeHtml(item.label),
+      numericCell(formatCurrency(item.total), 'accent'),
+      numericCell(String(item.count))
+    ]));
+
+    renderTable('Secondary', 'Inadimplência por faixa', [
+      'Faixa',
+      'Valor total',
+      'Qtd. títulos'
+    ], groupRows(filtered, 'faixa_atraso').map((item) => [
+      escapeHtml(item.label),
+      numericCell(formatCurrency(item.total), 'blue-txt'),
+      numericCell(String(item.count))
+    ]));
+
+    togglePanelSections(state.filters.tertiary === 'cliente' ? 'quantidade' : state.filters.tertiary === 'faixa' ? 'faturamento' : 'todos');
   }
 
-  function renderFilters(filters, aba) {
-    const container = document.getElementById('dashboardFilters');
-    if (!container) return;
-
-    container.className = `filters-row tab-filters-grid ${filters.length >= 4 ? 'filters-grid-four' : ''}`.trim();
-    container.innerHTML = filters.map((filter) => {
-      if (filter.type === 'select') {
-        return `
-          <label class="filter-field">
-            <span>${escapeHtml(filter.label)}</span>
-            <select data-filter-id="${escapeHtml(filter.id)}">
-              <option value="">Todos</option>
-              ${filter.options.map((option) => `<option value="${escapeHtml(option.value)}"${option.value === filter.value ? ' selected' : ''}>${escapeHtml(option.label)}</option>`).join('')}
-            </select>
-          </label>
-        `;
-      }
-
-      return `
-        <label class="filter-field">
-          <span>${escapeHtml(filter.label)}</span>
-          <input data-filter-id="${escapeHtml(filter.id)}" type="${escapeHtml(filter.type)}" value="${escapeHtml(filter.value || '')}" />
-        </label>
-      `;
-    }).join('');
-
-    container.querySelectorAll('[data-filter-id]').forEach((input) => {
-      input.addEventListener('input', () => {
-        state.filtros[aba][input.dataset.filterId] = input.value;
-        state.tabela.page = 1;
-        updateDashboard();
-      });
-      input.addEventListener('change', () => {
-        state.filtros[aba][input.dataset.filterId] = input.value;
-        state.tabela.page = 1;
-        updateDashboard();
-      });
-    });
+  function renderMiniCards(items) {
+    const labels = ['miniLabel1', 'miniLabel2', 'miniLabel3', 'miniLabel4'];
+    const values = ['miniValue1', 'miniValue2', 'miniValue3', 'miniValue4'];
+    setText('miniArquivos', String(items[0]?.value ?? 0));
+    labels.forEach((id, index) => setText(id, items[index + 1]?.label || '-'));
+    values.forEach((id, index) => setText(id, String(items[index + 1]?.value ?? 0)));
   }
 
-  function renderCards(cards) {
-    const container = document.getElementById('dashboardCards');
+  function renderBigCards(cards) {
+    const container = document.getElementById('bigCardsRow');
     if (!container) return;
     container.innerHTML = cards.map((card) => `
-      <article class="stat-card premium-kpi${card.accent ? ' accent' : ''}">
-        <span>${escapeHtml(card.label)}</span>
-        <strong>${escapeHtml(card.value)}</strong>
-      </article>
+      <div class="big-card bg-${escapeHtml(card.tone)}">
+        <div class="title">${escapeHtml(card.title)}</div>
+        <div class="value">${escapeHtml(card.value)}</div>
+        <div class="subbar">${escapeHtml(card.subbar)}</div>
+      </div>
     `).join('');
   }
 
-  function criarGrafico(canvasId, { type, data, options, onClick }) {
+  function renderDualBarLineCharts(config) {
+    setHtml('chartPrimaryTitle', config.primaryTitle);
+    setHtml('chartSecondaryTitle', config.secondaryTitle);
+    renderSummary('chartPrimarySummary', config.primarySummary);
+    renderSummary('chartSecondarySummary', config.secondarySummary);
+
+    createChart('primary', 'chartPrimary', {
+      labels: config.labels,
+      datasets: [
+        makeBarDataset('Realizado', config.primaryBarsA, 'rgba(255, 122, 26, 0.82)', config.primaryMode),
+        makeBarDataset('Meta', config.primaryBarsB, 'rgba(158, 227, 125, 0.76)', config.primaryMode),
+        makeLineDataset('% Atingido', config.primaryLine, '#c4f3af')
+      ]
+    }, config.primaryMode);
+
+    createChart('secondary', 'chartSecondary', {
+      labels: config.labels,
+      datasets: [
+        makeBarDataset('Realizado', config.secondaryBarsA, 'rgba(255, 122, 26, 0.82)', config.secondaryMode),
+        makeBarDataset('Meta', config.secondaryBarsB, 'rgba(120, 201, 255, 0.78)', config.secondaryMode),
+        makeLineDataset('% Atingido', config.secondaryLine, '#9bd9ff')
+      ]
+    }, config.secondaryMode);
+  }
+
+  function renderDualBarCharts(config) {
+    setHtml('chartPrimaryTitle', config.primaryTitle);
+    setHtml('chartSecondaryTitle', config.secondaryTitle);
+    renderSummary('chartPrimarySummary', config.primarySummary);
+    renderSummary('chartSecondarySummary', config.secondarySummary);
+
+    createChart('primary', 'chartPrimary', {
+      labels: config.primaryLabels,
+      datasets: [makeBarDataset('Valor', config.primaryValues, 'rgba(255, 122, 26, 0.82)', config.mode)]
+    }, config.mode);
+
+    createChart('secondary', 'chartSecondary', {
+      labels: config.secondaryLabels,
+      datasets: [makeBarDataset('Valor', config.secondaryValues, 'rgba(120, 201, 255, 0.78)', config.mode)]
+    }, config.mode);
+  }
+
+  function createChart(slot, canvasId, data, mode) {
     if (!window.Chart) return;
+    if (window.ChartDataLabels) {
+      window.Chart.register(window.ChartDataLabels);
+    }
 
-    const previous = state.charts.get(canvasId);
-    if (previous) previous.destroy();
-
+    state.charts[slot]?.destroy();
     const canvas = document.getElementById(canvasId);
     if (!canvas) return;
 
-    const chart = new window.Chart(canvas, {
-      type,
+    state.charts[slot] = new window.Chart(canvas, {
+      type: 'bar',
       data,
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        onClick: (_, elements, chart) => {
+          if (!elements?.length) return;
+          const label = chart.data.labels[elements[0].index];
+          state.clickedPrimary = state.clickedPrimary === label ? null : label;
+          updateDashboard();
+        },
         plugins: {
           legend: {
-            labels: { color: '#f5f7fb' }
+            labels: {
+              color: '#f5f7ff',
+              font: { weight: '700' }
+            }
           },
           tooltip: {
+            backgroundColor: 'rgba(11,16,32,0.96)',
+            borderColor: 'rgba(255,255,255,0.08)',
+            borderWidth: 1,
+            titleColor: '#fff',
+            bodyColor: '#dfe7ff',
             callbacks: {
               label(context) {
-                if (context.dataset?.label?.includes('%')) return `${context.dataset.label}: ${Number(context.raw || 0).toFixed(1)}%`;
-                if (canvasId === 'chartSecondary' && state.abaAtual === 'faturamento') return `${context.dataset.label}: ${formatNumber(context.raw)}`;
-                return `${context.dataset.label}: ${formatCurrency(context.raw)}`;
+                if (context.dataset.type === 'line') {
+                  return `${context.dataset.label}: ${formatPercent(context.raw)}`;
+                }
+                return `${context.dataset.label}: ${mode === 'money' ? formatCurrency(context.raw) : formatCompactNumber(context.raw)}`;
               }
+            }
+          },
+          datalabels: {
+            display(context) {
+              return context.dataset.type !== 'line';
+            },
+            color: '#ffffff',
+            anchor: 'end',
+            align: 'top',
+            offset: 2,
+            clamp: true,
+            font: { weight: '700', size: 10 },
+            formatter(value, context) {
+              if (context.dataset.type === 'line') return formatPercent(value);
+              return mode === 'money' ? compactCurrency(value) : compactNumber(value);
             }
           }
         },
-        onClick: (_, elements) => {
-          if (!elements?.length || !onClick) return;
-          const index = elements[0].index;
-          const label = data.labels[index];
-          onClick(label);
-        },
-        ...options
+        scales: {
+          x: {
+            ticks: { color: '#d1d9ef', font: { size: 11 } },
+            grid: { color: 'rgba(255,255,255,0.04)' }
+          },
+          y: {
+            beginAtZero: true,
+            ticks: {
+              color: '#d1d9ef',
+              callback(value) {
+                return mode === 'money' ? compactCurrency(value) : compactNumber(value);
+              }
+            },
+            grid: { color: 'rgba(255,255,255,0.08)' }
+          },
+          y1: {
+            position: 'right',
+            beginAtZero: true,
+            display: data.datasets.some((dataset) => dataset.type === 'line'),
+            grid: { drawOnChartArea: false },
+            ticks: {
+              color: '#9bd9ff',
+              callback(value) {
+                return `${value}%`;
+              }
+            }
+          }
+        }
       }
     });
-
-    state.charts.set(canvasId, chart);
   }
 
-  function renderManagedTable({ columns, rows, renderRow, defaultSortKey }) {
-    const head = document.getElementById('dashboardTableHead');
-    const body = document.getElementById('dashboardTableBody');
-    const footer = document.getElementById('dashboardTablePagination');
-    if (!head || !body || !footer) return;
+  function renderTable(suffix, title, headers, rows) {
+    setText(`table${suffix}Title`, title);
+    const thead = document.getElementById(`thead${suffix}`);
+    const tbody = document.getElementById(`tbody${suffix}`);
+    if (!thead || !tbody) return;
 
-    if (state.tabela.sortKey !== defaultSortKey && !state.tabela.sortKey) {
-      state.tabela.sortKey = defaultSortKey;
-      state.tabela.sortDirection = 'desc';
-    }
+    thead.innerHTML = `<tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>`;
+    tbody.innerHTML = rows.length
+      ? rows.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join('')}</tr>`).join('')
+      : '<tr><td colspan="6">Sem dados disponíveis.</td></tr>';
+  }
 
-    state.tabela.rows = rows;
-    state.tabela.columns = columns;
-    state.tabela.renderRow = renderRow;
-
-    head.innerHTML = columns.map((column) => `
-      <th data-sort-key="${escapeHtml(column.key)}"${column.numeric ? ' class="numeric-column"' : ''}>${escapeHtml(column.label)}</th>
-    `).join('');
-
-    head.querySelectorAll('th[data-sort-key]').forEach((header) => {
-      header.addEventListener('click', () => {
-        const key = header.dataset.sortKey;
-        if (state.tabela.sortKey === key) {
-          state.tabela.sortDirection = state.tabela.sortDirection === 'asc' ? 'desc' : 'asc';
-        } else {
-          state.tabela.sortKey = key;
-          state.tabela.sortDirection = 'asc';
-        }
-        state.tabela.page = 1;
-        renderManagedTable({ columns, rows, renderRow, defaultSortKey });
-      });
-    });
-
-    const sortedRows = sortRows(rows, state.tabela.sortKey, state.tabela.sortDirection);
-    const pageSize = 8;
-    const totalPages = Math.max(1, Math.ceil(sortedRows.length / pageSize));
-    state.tabela.page = Math.min(state.tabela.page, totalPages);
-    const start = (state.tabela.page - 1) * pageSize;
-    const pageRows = sortedRows.slice(start, start + pageSize);
-
-    body.innerHTML = pageRows.length
-      ? pageRows.map((row) => renderRow(row)).join('')
-      : `<tr><td colspan="${columns.length}" class="empty-state-cell">Sem dados disponíveis.</td></tr>`;
-
-    footer.innerHTML = `
-      <div class="meta-pill">Página ${state.tabela.page} de ${totalPages} • ${sortedRows.length} registros</div>
-      <div class="pager-actions">
-        <button class="btn btn-secondary" type="button" data-page="prev"${state.tabela.page === 1 ? ' disabled' : ''}>Anterior</button>
-        <button class="btn btn-secondary" type="button" data-page="next"${state.tabela.page === totalPages ? ' disabled' : ''}>Próxima</button>
+  function renderSummary(id, items) {
+    const element = document.getElementById(id);
+    if (!element) return;
+    element.innerHTML = items.map((item) => `
+      <div class="legend-box">
+        <span class="k">${escapeHtml(item.label)}</span>
+        <span class="v ${escapeHtml(item.className || '')}">${escapeHtml(item.value)}</span>
       </div>
-    `;
-
-    footer.querySelector('[data-page="prev"]')?.addEventListener('click', () => {
-      state.tabela.page = Math.max(1, state.tabela.page - 1);
-      renderManagedTable({ columns, rows, renderRow, defaultSortKey });
-    });
-    footer.querySelector('[data-page="next"]')?.addEventListener('click', () => {
-      state.tabela.page = Math.min(totalPages, state.tabela.page + 1);
-      renderManagedTable({ columns, rows, renderRow, defaultSortKey });
-    });
+    `).join('');
   }
 
-  function limparFiltros() {
-    const base = state.abaAtual === 'faturamento'
-      ? { mes: '', ano: '', unidade: '', chartSelection: '' }
-      : state.abaAtual === 'receber'
-        ? { cliente: '', portador: '', chartSelection: '' }
-        : { cliente: '', faixa: '', chartSelection: '' };
+  function togglePanelSections(mode) {
+    const hidePrimary = mode === 'faturamento';
+    const hideSecondary = mode === 'quantidade';
 
-    state.filtros[state.abaAtual] = base;
-    state.tabela.page = 1;
-    updateDashboard();
+    toggleDisplay('boxChartPrimary', !hidePrimary);
+    toggleDisplay('boxChartSecondary', !hideSecondary);
+    toggleDisplay('tableCardPrimary', !hidePrimary);
+    toggleDisplay('tableCardSecondary', !hideSecondary);
   }
 
-  function summarizeFaturamento(rows) {
+  function aggregateFaturamento(rows) {
     const map = new Map();
     rows.forEach((row) => {
       const key = row.unidade || 'Sem unidade';
       const current = map.get(key) || {
-        label: key,
-        unidadeMedida: row.unidade_medida || '-',
+        unidade: key,
         volumeRealizado: 0,
+        volumeMedio: 0,
         volumeProjetado: 0,
-        realizado: 0,
-        projetado: 0,
-        percentual: 0
+        faturamentoRealizado: 0,
+        faturamentoMedio: 0,
+        faturamentoProjetado: 0,
+        volumePercentual: 0,
+        faturamentoPercentual: 0
       };
+
       current.volumeRealizado += Number(row.volume_realizado || 0);
+      current.volumeMedio += Number(row.volume_medio || 0);
       current.volumeProjetado += Number(row.volume_projetado || 0);
-      current.realizado += Number(row.faturamento_realizado || 0);
-      current.projetado += Number(row.faturamento_projetado || 0);
-      current.percentual = current.projetado ? (current.realizado / current.projetado) * 100 : 0;
+      current.faturamentoRealizado += Number(row.faturamento_realizado || 0);
+      current.faturamentoMedio += Number(row.faturamento_medio || 0);
+      current.faturamentoProjetado += Number(row.faturamento_projetado || 0);
+      current.volumePercentual = current.volumeProjetado ? (current.volumeRealizado / current.volumeProjetado) * 100 : 0;
+      current.faturamentoPercentual = current.faturamentoProjetado ? (current.faturamentoRealizado / current.faturamentoProjetado) * 100 : 0;
       map.set(key, current);
     });
 
-    const byUnidade = [...map.values()].sort((a, b) => b.projetado - a.projetado);
+    return [...map.values()].sort((left, right) => right.faturamentoProjetado - left.faturamentoProjetado);
+  }
+
+  function aggregateByKey(rows, key, valueKey) {
+    const grouped = new Map();
+    rows.forEach((row) => {
+      const label = row[key] || 'Sem grupo';
+      grouped.set(label, (grouped.get(label) || 0) + Number(row[valueKey] || 0));
+    });
+    return [...grouped.entries()].map(([label, value]) => ({ label, value })).sort((left, right) => right.value - left.value);
+  }
+
+  function groupRows(rows, key) {
+    const grouped = new Map();
+    rows.forEach((row) => {
+      const label = row[key] || 'Sem grupo';
+      const current = grouped.get(label) || { label, total: 0, count: 0 };
+      current.total += Number(row.saldo || 0);
+      current.count += 1;
+      grouped.set(label, current);
+    });
+    return [...grouped.values()].sort((left, right) => right.total - left.total);
+  }
+
+  function numericCell(value, className) {
+    const classes = ['num'];
+    if (className) classes.push(className);
+    return `<span class="${classes.join(' ')}">${escapeHtml(value)}</span>`;
+  }
+
+  function makeBarDataset(label, data, color, mode) {
     return {
-      byUnidade,
-      totalRealizado: sum(rows, 'faturamento_realizado'),
-      totalProjetado: sum(rows, 'faturamento_projetado'),
-      totalFaturado: sum(rows, 'faturamento_realizado') + sum(rows, 'faturamento_medio')
+      label,
+      data,
+      backgroundColor: color,
+      borderColor: color,
+      borderWidth: 1,
+      borderRadius: 8,
+      customMode: mode
     };
   }
 
-  function aggregateMetric(rows, field, valueField) {
-    const bucket = new Map();
-    rows.forEach((row) => {
-      const label = row[field] || 'Sem grupo';
-      bucket.set(label, (bucket.get(label) || 0) + Number(row[valueField] || 0));
+  function makeLineDataset(label, data, color) {
+    return {
+      type: 'line',
+      label,
+      data,
+      yAxisID: 'y1',
+      borderColor: color,
+      backgroundColor: color,
+      pointRadius: 4,
+      pointHoverRadius: 6,
+      tension: 0.35
+    };
+  }
+
+  function fillSelect(selectId, labelId, label, options, selectedValue, allLabel) {
+    setText(labelId, label);
+    const select = document.getElementById(selectId);
+    if (!select) return;
+
+    const uniqueOptions = unique(options.filter(Boolean));
+    const optionMarkup = [`<option value="todos">${escapeHtml(allLabel)}</option>`]
+      .concat(uniqueOptions.map((option) => `<option value="${escapeHtml(option)}"${option === selectedValue ? ' selected' : ''}>${escapeHtml(option)}</option>`))
+      .join('');
+    select.innerHTML = optionMarkup;
+    if (!selectedValue) select.value = 'todos';
+  }
+
+  function fillCalendarInput(labelId, inputId, label, type, selectedValue, options) {
+    setText(labelId, label);
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    input.type = type;
+    const normalizedOptions = unique(options.filter(Boolean)).sort();
+    input.min = normalizedOptions[0] || '';
+    input.max = normalizedOptions[normalizedOptions.length - 1] || '';
+    input.value = selectedValue || '';
+  }
+
+  function setSelectValue(id, value) {
+    const element = document.getElementById(id);
+    if (element) element.value = value;
+  }
+
+  function setCalendarValue(id, value) {
+    const element = document.getElementById(id);
+    if (element) element.value = value;
+  }
+
+  function setupLogout() {
+    document.querySelectorAll('#logoutButton').forEach((button) => {
+      button.addEventListener('click', () => {
+        clearSession();
+        window.location.href = 'index.html';
+      });
     });
-    return [...bucket.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
   }
 
   function ensureAuthorized(requiredRole) {
@@ -707,109 +811,86 @@
       return null;
     }
     if (requiredRole === 'admin' && session.role !== 'admin') {
-      window.location.replace('dashboard.html');
+      window.location.replace('portal.html');
       return null;
     }
     return session;
   }
 
-  function setupLogout() {
-    const logoutButton = document.getElementById('logoutButton');
-    logoutButton?.addEventListener('click', () => {
-      clearSession();
-      window.location.href = 'index.html';
+  function highlightPanelLinks(panel) {
+    document.querySelectorAll('[data-panel-button]').forEach((button) => {
+      const isActive = button.dataset.panelButton === panel;
+      button.classList.toggle('is-active', isActive);
+      button.setAttribute('aria-pressed', isActive ? 'true' : 'false');
     });
   }
 
-  function buildAxisOptions(title) {
-    return {
-      title: buildAxisTitle(title),
-      ticks: {
-        color: '#d4def8',
-        maxRotation: 0,
-        autoSkip: false
-      },
-      grid: {
-        display: false
-      }
-    };
+  function getRequestedPanel() {
+    const panel = new URLSearchParams(window.location.search).get('panel');
+    return panel && PANEL_META[panel] ? panel : 'faturamento';
   }
 
-  function buildValueAxis(title) {
-    return {
-      beginAtZero: true,
-      title: buildAxisTitle(title),
-      ticks: {
-        color: '#99a5c3',
-        callback: (value) => compactCurrency(value)
-      },
-      grid: { color: 'rgba(255,255,255,0.07)' }
-    };
+  function setText(id, value) {
+    const element = document.getElementById(id);
+    if (element) element.textContent = value || '';
   }
 
-  function buildNumberAxis(title) {
-    return {
-      beginAtZero: true,
-      title: buildAxisTitle(title),
-      ticks: {
-        color: '#99a5c3',
-        callback: (value) => compactNumber(value)
-      },
-      grid: { color: 'rgba(255,255,255,0.07)' }
-    };
+  function setHtml(id, value) {
+    const element = document.getElementById(id);
+    if (element) element.innerHTML = value || '';
   }
 
-  function buildAxisTitle(text) {
-    return {
-      display: true,
-      text,
-      color: '#99a5c3',
-      font: { size: 12, weight: '600' }
-    };
+  function toggleDisplay(id, visible) {
+    const element = document.getElementById(id);
+    if (element) element.style.display = visible ? '' : 'none';
   }
 
-  function parsePeriodo(value) {
+  function unique(items) {
+    return [...new Set(items)];
+  }
+
+  function extractMonthKey(value) {
     const raw = String(value || '').trim();
-    const match = raw.match(/^(\d{4})[-/](\d{1,2})$/) || raw.match(/^(\d{1,2})[-/](\d{4})$/);
-    if (!match) return null;
-    if (raw.match(/^(\d{4})[-/](\d{1,2})$/)) return { year: Number(match[1]), month: Number(match[2]) };
-    return { year: Number(match[2]), month: Number(match[1]) };
-  }
+    if (!raw) return '';
 
-  function optionObject(value) {
-    return { value, label: value };
-  }
+    if (/^\d{4}-\d{2}$/.test(raw)) return raw;
 
-  function uniqueOptions(options) {
-    const seen = new Map();
-    options.forEach((option) => {
-      if (!option?.value || seen.has(option.value)) return;
-      seen.set(option.value, option);
-    });
-    return [...seen.values()];
-  }
+    const yearMonth = raw.match(/^(\d{4})[\/.-](\d{1,2})$/);
+    if (yearMonth) return `${yearMonth[1]}-${String(yearMonth[2]).padStart(2, '0')}`;
 
-  function uniqueValues(rows, field) {
-    return [...new Set(rows.map((row) => row[field]).filter(Boolean))].sort();
-  }
+    const monthYear = raw.match(/^(\d{1,2})[\/.-](\d{4})$/);
+    if (monthYear) return `${monthYear[2]}-${String(monthYear[1]).padStart(2, '0')}`;
 
-  function sortRows(rows, sortKey, direction) {
-    const factor = direction === 'asc' ? 1 : -1;
-    return [...rows].sort((left, right) => compareValues(left?.[sortKey], right?.[sortKey]) * factor);
-  }
-
-  function compareValues(left, right) {
-    const leftNumber = Number(left);
-    const rightNumber = Number(right);
-    if (!Number.isNaN(leftNumber) && !Number.isNaN(rightNumber) && String(left).trim() !== '' && String(right).trim() !== '') {
-      return leftNumber - rightNumber;
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) {
+      return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}`;
     }
-    const leftDate = Date.parse(left);
-    const rightDate = Date.parse(right);
-    if (!Number.isNaN(leftDate) && !Number.isNaN(rightDate)) {
-      return leftDate - rightDate;
-    }
-    return String(left || '').localeCompare(String(right || ''), 'pt-BR', { numeric: true, sensitivity: 'base' });
+
+    return '';
+  }
+
+  function toDateInputValue(value) {
+    const date = value ? new Date(value) : null;
+    if (!date || Number.isNaN(date.getTime())) return '';
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  function sum(rows, key) {
+    return rows.reduce((total, row) => total + Number(row[key] || 0), 0);
+  }
+
+  function localeSort(left, right) {
+    return left.localeCompare(right, 'pt-BR', { sensitivity: 'base' });
+  }
+
+  function compactNumber(value) {
+    return new Intl.NumberFormat('pt-BR', {
+      notation: 'compact',
+      maximumFractionDigits: 1
+    }).format(Number(value || 0));
   }
 
   function compactCurrency(value) {
@@ -821,23 +902,14 @@
     }).format(Number(value || 0));
   }
 
-  function compactNumber(value) {
-    return new Intl.NumberFormat('pt-BR', {
-      notation: 'compact',
-      maximumFractionDigits: 1
-    }).format(Number(value || 0));
-  }
-
-  function sum(rows, field) {
-    return rows.reduce((total, row) => total + Number(row[field] || 0), 0);
-  }
-
-  function formatNumber(value) {
+  function formatCompactNumber(value) {
     return Number(value || 0).toLocaleString('pt-BR');
   }
 
-  function setText(id, value) {
-    const element = document.getElementById(id);
-    if (element) element.textContent = value || '';
+  function formatPercent(value) {
+    return `${Number(value || 0).toLocaleString('pt-BR', {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1
+    })}%`;
   }
 })();
