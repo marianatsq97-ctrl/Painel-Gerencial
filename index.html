@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Portal Gerencial | Entrar</title>
+    <title>Financeiro | Entrar</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -13,23 +13,69 @@
     <link rel="stylesheet" href="style.css" />
   </head>
   <body data-page="login">
-    <main class="login-screen">
-      <section class="login-panel">
-        <img class="login-logo" src="logo-areia-ana.svg" alt="Logo Areia Ana" />
-        <form id="loginForm" class="login-form" novalidate>
-          <label class="login-field">
+    <main class="page page-login">
+      <section class="portal-entry-card premium-card centered-panel">
+        <img class="logo" src="logo-areia-ana.svg" alt="Logo Areia Ana" />
+        <span class="eyebrow">Portal de acessos</span>
+        <h1>Portal Financeiro – Grupo Areia Ana</h1>
+        <p class="page-description">
+          Acesso centralizado ao ambiente executivo com projeções e faturamento, contas a receber e inadimplentes.
+        </p>
+
+        <nav class="portal-tab-preview" aria-label="Áreas do portal">
+          <span class="portal-chip is-active">Projeções e faturamento</span>
+          <span class="portal-chip">A receber</span>
+          <span class="portal-chip">Inadimplentes</span>
+        </nav>
+
+        <div class="portal-card-grid">
+          <article class="portal-link-card">
+            <span class="eyebrow">Resumo</span>
+            <h2>Projeções e faturamento</h2>
+            <p>Visão consolidada de realizado, projetado, volumes e faturamento por unidade.</p>
+          </article>
+          <article class="portal-link-card">
+            <span class="eyebrow">Operacional</span>
+            <h2>A receber</h2>
+            <p>Acompanhamento por cliente, portador, vencimento e títulos em carteira.</p>
+          </article>
+          <article class="portal-link-card">
+            <span class="eyebrow">Cobrança</span>
+            <h2>Inadimplentes</h2>
+            <p>Monitoramento de clientes vencidos, faixas de atraso e detalhamento executivo.</p>
+          </article>
+        </div>
+
+        <form id="loginForm" class="form-grid portal-login-form" novalidate>
+          <div class="portal-form-header">
+            <h2>Entrar no portal</h2>
+            <span>Informe seu usuário para acessar o ambiente corporativo.</span>
+          </div>
+
+          <label class="field">
             <span>Usuário</span>
             <input id="username" name="username" type="text" autocomplete="username" placeholder="Digite seu usuário" required />
           </label>
 
-          <label class="login-field">
+          <label class="field">
             <span>Senha</span>
             <input id="password" name="password" type="password" autocomplete="current-password" placeholder="Digite sua senha" required />
           </label>
 
-          <button class="login-submit" type="submit">Acessar</button>
-          <p id="loginMessage" class="login-message" role="alert" aria-live="polite"></p>
+          <button class="btn btn-primary btn-block" type="submit">Acessar portal</button>
+          <p id="loginMessage" class="form-message" role="alert" aria-live="polite"></p>
         </form>
+
+        <div class="credentials-box">
+          <div>
+            <strong>Administrador</strong>
+            <span>admin / admin123</span>
+          </div>
+          <div>
+            <strong>Usuário</strong>
+            <span>usuario / 123</span>
+          </div>
+        </div>
       </section>
     </main>
 
