@@ -3,7 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Financeiro | Dashboard</title>
+    <title>Painel Gerencial</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -11,110 +13,124 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="style.css" />
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   </head>
   <body data-page="dashboard">
-    <main class="page page-login dashboard-page">
-      <section class="premium-card dashboard-card centered-panel wide-panel executive-panel">
-        <header class="portal-topbar">
-          <div class="portal-brand">
-            <img class="logo brand-logo" src="logo-areia-ana.svg" alt="Logo Areia Ana" />
-            <div>
-              <span class="eyebrow">Portal executivo</span>
-              <h1 id="dashboardSectionTitle">Faturamento</h1>
-              <p class="page-description">Portal Financeiro – Grupo Areia Ana</p>
-            </div>
-          </div>
-          <div class="portal-meta">
-            <div class="meta-pill" id="dashboardUpdatedAt">Sem atualização</div>
-            <div class="profile-chip">
-              <span>Perfil</span>
-              <strong id="sessionRoleLabel">Usuário</strong>
-            </div>
-            <button class="btn btn-ghost" id="logoutButton" type="button">Sair</button>
-          </div>
-        </header>
+    <main class="dashboard-page-shell">
+      <header class="dashboard-header-bar">
+        <div>
+          <span class="dashboard-kicker">Portal Gerencial</span>
+          <h1 id="dashboardTitle">Painel</h1>
+          <p id="dashboardSubtitle">Selecione filtros para analisar os indicadores.</p>
+        </div>
+        <div class="dashboard-header-actions">
+          <a class="dashboard-header-btn" href="portal.html">Voltar ao portal</a>
+          <a class="dashboard-header-btn is-hidden" id="dashboardAdminLink" href="admin.html">Atualizar bases</a>
+          <button class="dashboard-header-btn is-hidden" id="clearDashboardReportsButton" type="button">Limpar relatórios</button>
+          <button class="dashboard-header-btn is-ghost" id="logoutButton" type="button">Sair</button>
+        </div>
+      </header>
 
-        <div id="dashboardEmptyState" class="status-banner is-idle hidden-banner">
-          Nenhum dado financeiro foi processado ainda. Vá ao admin, envie as bases e rode a consolidação.
+      <div id="dashboardEmptyState" class="dashboard-empty is-hidden">
+        Nenhum dado financeiro foi processado ainda. Vá ao painel administrativo, envie as bases e rode a consolidação.
+      </div>
+
+      <nav class="dashboard-panel-switch" aria-label="Trocar aba do painel">
+        <button class="dashboard-switch-link" data-panel-button="faturamento" type="button">Projeções e faturamento</button>
+        <button class="dashboard-switch-link" data-panel-button="receber" type="button">A receber</button>
+        <button class="dashboard-switch-link" data-panel-button="inadimplentes" type="button">Inadimplentes</button>
+      </nav>
+
+      <section class="dashboard-container">
+        <div class="topbar">
+          <div class="filter-box">
+            <label id="filterCalendarLabel" for="filterCalendar">Filtro por calendário</label>
+            <input id="filterCalendar" type="month" />
+          </div>
+
+          <div class="filter-box">
+            <label id="filterPrimaryLabel" for="filterPrimary">Filtro principal</label>
+            <select id="filterPrimary"></select>
+          </div>
+
+          <div class="filter-box">
+            <label id="filterSecondaryLabel" for="filterSecondary">Filtro secundário</label>
+            <select id="filterSecondary"></select>
+          </div>
+
+          <div class="filter-box">
+            <label id="filterTertiaryLabel" for="filterTertiary">Visualização</label>
+            <select id="filterTertiary"></select>
+          </div>
+
+          <button class="btn-clear" id="btnLimpar" type="button">Limpar filtros</button>
         </div>
 
-        <nav class="tab-nav tab-nav-centered" aria-label="Abas do dashboard">
-          <button class="tab-button is-active" type="button" data-aba="faturamento">Faturamento</button>
-          <button class="tab-button" type="button" data-aba="receber">A Receber</button>
-          <button class="tab-button" type="button" data-aba="inadimplentes">Inadimplentes</button>
-        </nav>
+        <div class="mini-cards">
+          <div class="small-card highlight-orange">
+            <div class="small-title">Arquivos</div>
+            <div class="small-value" id="miniArquivos">0</div>
+          </div>
+          <div class="small-card">
+            <div class="small-title" id="miniLabel1">Base 1</div>
+            <div class="small-value" id="miniValue1">0</div>
+          </div>
+          <div class="small-card">
+            <div class="small-title" id="miniLabel2">Base 2</div>
+            <div class="small-value" id="miniValue2">0</div>
+          </div>
+          <div class="small-card">
+            <div class="small-title" id="miniLabel3">Base 3</div>
+            <div class="small-value" id="miniValue3">0</div>
+          </div>
+          <div class="small-card">
+            <div class="small-title" id="miniLabel4">Base 4</div>
+            <div class="small-value" id="miniValue4">0</div>
+          </div>
+        </div>
 
-        <section class="dashboard-section-shell executive-section executive-section-centered">
-          <header class="dashboard-section-header executive-section-header">
-            <span class="eyebrow" id="dashboardSectionEyebrow">tb_projecoes</span>
-            <h2 id="dashboardSectionSubtitle">Painel executivo de faturamento</h2>
-            <p id="dashboardSectionDescription">
-              Estrutura corporativa unificada com filtros, indicadores, gráficos e detalhamento da aba selecionada.
-            </p>
-          </header>
+        <div class="stats-row" id="bigCardsRow"></div>
 
-          <div class="section-actions-row">
-            <div class="action-button-group">
-              <a class="btn btn-secondary action-button" href="admin.html">Atualizar bases</a>
-              <button class="btn btn-ghost action-button" id="clearFiltersButton" type="button">Limpar filtros</button>
+        <div class="charts-row">
+          <div class="chart-card" id="boxChartPrimary">
+            <h2 class="chart-title" id="chartPrimaryTitle">Gráfico principal</h2>
+            <div class="chart-wrap">
+              <canvas id="chartPrimary"></canvas>
             </div>
-            <div id="dashboardFilters" class="filters-row tab-filters-grid filters-grid-four"></div>
+            <div class="legend-footer" id="chartPrimarySummary"></div>
           </div>
 
-          <section class="dashboard-block">
-            <div class="section-heading compact-heading">
-              <div>
-                <span class="eyebrow">Resumo</span>
-                <h2>Indicadores principais</h2>
-              </div>
+          <div class="chart-card" id="boxChartSecondary">
+            <h2 class="chart-title" id="chartSecondaryTitle">Gráfico secundário</h2>
+            <div class="chart-wrap">
+              <canvas id="chartSecondary"></canvas>
             </div>
-            <div id="dashboardCards" class="stats-grid dashboard-kpis dashboard-kpis-grid"></div>
-          </section>
+            <div class="legend-footer" id="chartSecondarySummary"></div>
+          </div>
+        </div>
 
-          <section class="dashboard-block">
-            <div class="section-heading compact-heading">
-              <div>
-                <span class="eyebrow">Evolução / Gráficos</span>
-                <h2 id="dashboardChartTitle">Análises gráficas</h2>
-              </div>
+        <div class="tables-row">
+          <div class="table-card" id="tableCardPrimary">
+            <div class="table-header orange" id="tablePrimaryTitle">Tabela 1</div>
+            <div class="table-scroll">
+              <table>
+                <thead id="theadPrimary"></thead>
+                <tbody id="tbodyPrimary"></tbody>
+              </table>
             </div>
-            <div class="dashboard-chart-grid unified-chart-grid">
-              <article class="premium-card inner-card chart-panel chart-panel-primary">
-                <div class="section-heading compact-heading"><h2 id="chart1Title">Gráfico principal</h2></div>
-                <div class="chart-canvas-shell">
-                  <canvas id="chartPrimary"></canvas>
-                </div>
-              </article>
-              <article class="premium-card inner-card chart-panel">
-                <div class="section-heading compact-heading"><h2 id="chart2Title">Gráfico complementar</h2></div>
-                <div class="chart-canvas-shell">
-                  <canvas id="chartSecondary"></canvas>
-                </div>
-              </article>
-            </div>
-          </section>
+          </div>
 
-          <section class="dashboard-block">
-            <div class="section-heading compact-heading">
-              <div>
-                <span class="eyebrow">Detalhamento</span>
-                <h2 id="dashboardTableTitle">Tabela detalhada</h2>
-              </div>
+          <div class="table-card" id="tableCardSecondary">
+            <div class="table-header blue" id="tableSecondaryTitle">Tabela 2</div>
+            <div class="table-scroll">
+              <table>
+                <thead id="theadSecondary"></thead>
+                <tbody id="tbodySecondary"></tbody>
+              </table>
             </div>
-            <article class="premium-card inner-card table-panel dashboard-table-panel">
-              <div class="table-shell executive-table-shell">
-                <table id="dashboardTable" class="executive-table sortable-table">
-                  <thead>
-                    <tr id="dashboardTableHead"></tr>
-                  </thead>
-                  <tbody id="dashboardTableBody"></tbody>
-                </table>
-              </div>
-              <div id="dashboardTablePagination" class="table-footer"></div>
-            </article>
-          </section>
-        </section>
+          </div>
+        </div>
+
+        <div class="footer-note" id="footerNote">Clique em uma barra ou ponto do gráfico para filtrar por unidade.</div>
       </section>
     </main>
 
