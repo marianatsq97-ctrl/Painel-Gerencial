@@ -4,6 +4,7 @@
     VALID_EXTENSIONS,
     saveFinanceData,
     getFinanceData,
+    clearFinanceData,
     formatDateBR,
     formatDateTimeBR,
     escapeHtml,
@@ -43,10 +44,12 @@
 
     const input = document.getElementById('fileInput');
     const processButton = document.getElementById('processButton');
+    const clearButton = document.getElementById('clearReportsButton');
 
     input?.setAttribute('accept', [...VALID_EXTENSIONS, '.eb', '.txt'].join(','));
     input?.addEventListener('change', handleFileSelection);
     processButton?.addEventListener('click', processSelectedFiles);
+    clearButton?.addEventListener('click', clearReports);
 
     const existingData = getFinanceData();
     if (existingData?.tables) {
@@ -58,6 +61,43 @@
     selectedFiles = Array.from(event.currentTarget?.files || []);
     setText('selectedFileLabel', selectedFiles.length ? selectedFiles.map((file) => file.name).join(' • ') : 'Nenhum arquivo selecionado');
     setMessage(selectedFiles.length ? 'Arquivos prontos para processamento.' : 'Selecione os arquivos das bases.', 'idle');
+  }
+
+  function clearReports() {
+    clearFinanceData();
+    selectedFiles = [];
+
+    const input = document.getElementById('fileInput');
+    if (input) input.value = '';
+
+    setText('selectedFileLabel', 'Nenhum arquivo selecionado');
+    setText('fileNameValue', '0');
+    setText('projecoesValue', '0');
+    setText('receberValue', '0');
+    setText('inadimplentesValue', '0');
+    setText('updatedAtValue', 'Sem atualização');
+    setText('previewTitle', 'Amostra da última tabela gerada');
+
+    const metadataList = document.getElementById('metadataList');
+    if (metadataList) {
+      metadataList.innerHTML = `
+        <div><dt>Status</dt><dd>Relatórios limpos para novo envio.</dd></div>
+        <div><dt>Arquivos</dt><dd>-</dd></div>
+        <div><dt>Última ação</dt><dd>-</dd></div>
+      `;
+    }
+
+    const fileListPreview = document.getElementById('fileListPreview');
+    if (fileListPreview) fileListPreview.innerHTML = '';
+
+    const previewTableHead = document.getElementById('previewTableHead');
+    const previewTableBody = document.getElementById('previewTableBody');
+    if (previewTableHead) previewTableHead.innerHTML = '<tr><th>Sem dados</th></tr>';
+    if (previewTableBody) {
+      previewTableBody.innerHTML = '<tr><td colspan="6" class="empty-state-cell">A prévia será exibida após o processamento.</td></tr>';
+    }
+
+    setMessage('Relatórios removidos. Agora você pode enviar novas bases.', 'success');
   }
 
   async function processSelectedFiles() {
