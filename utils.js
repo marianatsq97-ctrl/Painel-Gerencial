@@ -130,6 +130,11 @@
     }
   }
 
+  function clearFinanceData() {
+    localStorage.removeItem(STORAGE_KEYS.financeData);
+    localStorage.removeItem('aa_finance_data');
+  }
+
   window.FinanceiroUtils = {
     STORAGE_KEYS,
     REQUIRED_SHEET,
@@ -138,6 +143,7 @@
     formatCurrency,
     formatDateBR,
     formatDateTimeBR,
+    clearFinanceData,
     getFinanceData,
     getSession,
     normalizeText,
