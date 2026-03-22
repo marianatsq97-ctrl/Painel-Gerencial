@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Financeiro | Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  </head>
+  <body data-page="dashboard">
+    <main class="page page-login dashboard-page">
+      <section class="premium-card dashboard-card centered-panel wide-panel executive-panel">
+        <header class="portal-topbar">
+          <div class="portal-brand">
+            <img class="logo brand-logo" src="logo-areia-ana.svg" alt="Logo Areia Ana" />
+            <div>
+              <span class="eyebrow">Portal executivo</span>
+              <h1 id="dashboardSectionTitle">Faturamento</h1>
+              <p class="page-description">Portal Financeiro – Grupo Areia Ana</p>
+            </div>
+          </div>
+          <div class="portal-meta">
+            <div class="meta-pill" id="dashboardUpdatedAt">Sem atualização</div>
+            <div class="profile-chip">
+              <span>Perfil</span>
+              <strong id="sessionRoleLabel">Usuário</strong>
+            </div>
+            <button class="btn btn-ghost" id="logoutButton" type="button">Sair</button>
+          </div>
+        </header>
+
+        <div id="dashboardEmptyState" class="status-banner is-idle hidden-banner">
+          Nenhum dado financeiro foi processado ainda. Vá ao admin, envie as bases e rode a consolidação.
+        </div>
+
+        <nav class="tab-nav tab-nav-centered" aria-label="Abas do dashboard">
+          <button class="tab-button is-active" type="button" data-aba="faturamento">Faturamento</button>
+          <button class="tab-button" type="button" data-aba="receber">A Receber</button>
+          <button class="tab-button" type="button" data-aba="inadimplentes">Inadimplentes</button>
+        </nav>
+
+        <section class="dashboard-section-shell executive-section executive-section-centered">
+          <header class="dashboard-section-header executive-section-header">
+            <span class="eyebrow" id="dashboardSectionEyebrow">tb_projecoes</span>
+            <h2 id="dashboardSectionSubtitle">Painel executivo de faturamento</h2>
+            <p id="dashboardSectionDescription">
+              Estrutura corporativa unificada com filtros, indicadores, gráficos e detalhamento da aba selecionada.
+            </p>
+          </header>
+
+          <div class="section-actions-row">
+            <div class="action-button-group">
+              <a class="btn btn-secondary action-button" href="admin.html">Atualizar bases</a>
+              <button class="btn btn-ghost action-button" id="clearFiltersButton" type="button">Limpar filtros</button>
+            </div>
+            <div id="dashboardFilters" class="filters-row tab-filters-grid filters-grid-four"></div>
+          </div>
+
+          <section class="dashboard-block">
+            <div class="section-heading compact-heading">
+              <div>
+                <span class="eyebrow">Resumo</span>
+                <h2>Indicadores principais</h2>
+              </div>
+            </div>
+            <div id="dashboardCards" class="stats-grid dashboard-kpis dashboard-kpis-grid"></div>
+          </section>
+
+          <section class="dashboard-block">
+            <div class="section-heading compact-heading">
+              <div>
+                <span class="eyebrow">Evolução / Gráficos</span>
+                <h2 id="dashboardChartTitle">Análises gráficas</h2>
+              </div>
+            </div>
+            <div class="dashboard-chart-grid unified-chart-grid">
+              <article class="premium-card inner-card chart-panel chart-panel-primary">
+                <div class="section-heading compact-heading"><h2 id="chart1Title">Gráfico principal</h2></div>
+                <div class="chart-canvas-shell">
+                  <canvas id="chartPrimary"></canvas>
+                </div>
+              </article>
+              <article class="premium-card inner-card chart-panel">
+                <div class="section-heading compact-heading"><h2 id="chart2Title">Gráfico complementar</h2></div>
+                <div class="chart-canvas-shell">
+                  <canvas id="chartSecondary"></canvas>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="dashboard-block">
+            <div class="section-heading compact-heading">
+              <div>
+                <span class="eyebrow">Detalhamento</span>
+                <h2 id="dashboardTableTitle">Tabela detalhada</h2>
+              </div>
+            </div>
+            <article class="premium-card inner-card table-panel dashboard-table-panel">
+              <div class="table-shell executive-table-shell">
+                <table id="dashboardTable" class="executive-table sortable-table">
+                  <thead>
+                    <tr id="dashboardTableHead"></tr>
+                  </thead>
+                  <tbody id="dashboardTableBody"></tbody>
+                </table>
+              </div>
+              <div id="dashboardTablePagination" class="table-footer"></div>
+            </article>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script src="utils.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
